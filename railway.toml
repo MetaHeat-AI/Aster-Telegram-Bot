@@ -1,0 +1,16 @@
+[build]
+builder = "NIXPACKS"
+
+[deploy]
+numReplicas = 1
+startCommand = "npm start"
+restartPolicyType = "ON_FAILURE"
+
+[[services]]
+name = "aster-trading-bot"
+
+[services.healthcheck]
+path = "/health"
+port = 3000
+interval = 30
+timeout = 10

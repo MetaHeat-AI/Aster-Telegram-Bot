@@ -1,0 +1,16 @@
+node_modules/
+dist/
+.env
+.env.local
+.env.production
+.env.test
+*.log
+logs/
+.DS_Store
+.vscode/
+.idea/
+coverage/
+*.tsbuildinfo
+artifacts/
+test-server.js
+aster_bot.db
