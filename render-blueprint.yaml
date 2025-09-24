@@ -3,36 +3,26 @@ services:
     name: aster-dex-telegram-bot
     env: node
     plan: starter
+    region: oregon
     buildCommand: npm install && npm run build
     startCommand: npm start
     healthCheckPath: /health
     envVars:
       - key: NODE_ENV
         value: production
-      - key: TELEGRAM_BOT_TOKEN
-        sync: false
-      - key: TG_BOT_TOKEN  
-        sync: false
-      - key: ASTER_API_KEY
-        sync: false
-      - key: ASTER_API_SECRET
-        sync: false
       - key: ASTER_BASE_URL
         value: https://fapi.asterdex.com
-      - key: DATABASE_URL
-        sync: false
-      - key: ENCRYPTION_KEY
-        sync: false
       - key: DEFAULT_RECV_WINDOW
         value: "5000"
       - key: MAX_LEVERAGE
-        value: "20"
+        value: "20" 
       - key: RATE_LIMIT_WINDOW_MS
-        value: "60000"  
+        value: "60000"
       - key: RATE_LIMIT_MAX_REQUESTS
         value: "100"
-
+        
 databases:
-  - name: aster-bot-db
+  - name: aster-bot-postgres
     databaseName: aster_bot
     user: aster_bot_user
+    plan: starter
