@@ -34,6 +34,7 @@ class AsterTradingBot {
   
   private userSessions = new Map<number, AsterApiClient>();
   private pendingTrades = new Map<number, any>();
+  private conversationStates = new Map<number, UserState['conversationState']>();
 
   constructor() {
     this.config = this.loadConfig();
@@ -105,6 +106,7 @@ class AsterTradingBot {
           telegramId: ctx.from.id,
           isLinked: !!credentials,
           settings,
+          conversationState: this.conversationStates.get(user.id), // Get from memory store
         };
       } catch (error) {
         console.error('Middleware error:', error);
@@ -390,10 +392,12 @@ ${TradeParser.generateExamples().map(ex => `• \`${ex}\``).join('\n')}
     }
 
     // Set conversation state
-    ctx.userState.conversationState = {
-      step: 'waiting_api_key',
-      data: { pendingAction: 'link' }
+    const conversationState = {
+      step: 'waiting_api_key' as const,
+      data: { pendingAction: 'link' as const }
     };
+    ctx.userState.conversationState = conversationState;
+    this.conversationStates.set(ctx.userState.userId, conversationState);
 
     await ctx.reply(`
 🔗 **Link Your Aster API Credentials**
@@ -432,11 +436,13 @@ Please send your **API Key** now:
         default:
           // Clear invalid state
           ctx.userState.conversationState = undefined;
+          this.conversationStates.delete(ctx.userState.userId);
           await ctx.reply('❌ Invalid conversation state. Please try again.');
       }
     } catch (error) {
       console.error('Conversation state error:', error);
       ctx.userState.conversationState = undefined;
+      this.conversationStates.delete(ctx.userState.userId);
       await ctx.reply('❌ An error occurred. Please try again.');
     }
   }
@@ -451,8 +457,12 @@ Please send your **API Key** now:
     }
 
     // Store API key temporarily
-    ctx.userState.conversationState.step = 'waiting_api_secret';
-    ctx.userState.conversationState.data!.apiKey = apiKey;
+    const updatedState = {
+      step: 'waiting_api_secret' as const,
+      data: { ...ctx.userState.conversationState.data, apiKey }
+    };
+    ctx.userState.conversationState = updatedState;
+    this.conversationStates.set(ctx.userState.userId, updatedState);
 
     await ctx.reply(`✅ API Key received.\n\nNow please send your **API Secret**:`);
   }
@@ -478,6 +488,7 @@ Please send your **API Key** now:
       if (!isValid) {
         await ctx.reply('❌ Invalid API credentials. Please check your API key and secret and try again with /link');
         ctx.userState.conversationState = undefined;
+        this.conversationStates.delete(ctx.userState.userId);
         return;
       }
 
@@ -490,6 +501,7 @@ Please send your **API Key** now:
       // Update user state
       ctx.userState.isLinked = true;
       ctx.userState.conversationState = undefined;
+      this.conversationStates.delete(ctx.userState.userId);
       
       // Store API client in session
       this.userSessions.set(ctx.userState.userId, testClient);
@@ -499,6 +511,7 @@ Please send your **API Key** now:
     } catch (error) {
       console.error('API validation error:', error);
       ctx.userState.conversationState = undefined;
+      this.conversationStates.delete(ctx.userState.userId);
       await ctx.reply('❌ Failed to validate credentials. Please ensure they\'re correct and try again with /link');
     }
   }
@@ -508,6 +521,7 @@ Please send your **API Key** now:
     // For now, clear the conversation state
     if (ctx.userState) {
       ctx.userState.conversationState = undefined;
+      this.conversationStates.delete(ctx.userState.userId);
     }
     await ctx.reply('🔐 PIN functionality not yet implemented.');
   }
@@ -517,6 +531,7 @@ Please send your **API Key** now:
 
     const confirmation = response.toLowerCase().trim();
     ctx.userState.conversationState = undefined;
+    this.conversationStates.delete(ctx.userState.userId);
 
     if (confirmation === 'yes' || confirmation === 'y' || confirmation === 'confirm') {
       await this.performUnlink(ctx);
