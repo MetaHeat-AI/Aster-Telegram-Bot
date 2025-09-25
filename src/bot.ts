@@ -37,7 +37,7 @@ class AsterTradingBot {
 
   constructor() {
     this.config = this.loadConfig();
-    this.db = new DatabaseManager(this.config.database.url, this.config.redis.url);
+    this.db = new DatabaseManager(this.config.database.url, this.config.redis?.url);
     this.encryption = new EncryptionManager(this.config.encryption.key);
     this.filtersManager = new FiltersManager();
     this.priceProtection = new PriceProtectionManager(this.filtersManager);
@@ -68,9 +68,9 @@ class AsterTradingBot {
       database: {
         url: process.env.DATABASE_URL!,
       },
-      redis: {
-        url: process.env.REDIS_URL || 'redis://localhost:6379',
-      },
+      redis: process.env.REDIS_URL ? {
+        url: process.env.REDIS_URL,
+      } : undefined,
       encryption: {
         key: process.env.ENCRYPTION_KEY!,
       },

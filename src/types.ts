@@ -428,7 +428,7 @@ export interface BotConfig {
   database: {
     url: string;
   };
-  redis: {
+  redis?: {
     url: string;
   };
   encryption: {
@@ -458,7 +458,7 @@ export const BotConfigSchema = z.object({
   }),
   redis: z.object({
     url: z.string(),
-  }),
+  }).optional(),
   encryption: z.object({
     key: z.string().min(32),
   }),

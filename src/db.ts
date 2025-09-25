@@ -10,9 +10,9 @@ import {
 
 export class DatabaseManager {
   private pool: Pool;
-  private redis: RedisClientType;
+  private redis?: RedisClientType;
 
-  constructor(databaseUrl: string, redisUrl: string) {
+  constructor(databaseUrl: string, redisUrl?: string) {
     this.pool = new Pool({
       connectionString: databaseUrl,
       ssl: process.env.NODE_ENV === 'production' ? { rejectUnauthorized: false } : false,
@@ -21,9 +21,11 @@ export class DatabaseManager {
       connectionTimeoutMillis: 2000,
     });
 
-    this.redis = createClient({
-      url: redisUrl,
-    }) as RedisClientType;
+    if (redisUrl) {
+      this.redis = createClient({
+        url: redisUrl,
+      }) as RedisClientType;
+    }
 
     this.setupEventHandlers();
   }
@@ -37,18 +39,25 @@ export class DatabaseManager {
       console.error('[DB] PostgreSQL error:', err);
     });
 
-    this.redis.on('connect', () => {
-      console.log('[Redis] Connected');
-    });
+    if (this.redis) {
+      this.redis.on('connect', () => {
+        console.log('[Redis] Connected');
+      });
 
-    this.redis.on('error', (err) => {
-      console.error('[Redis] Error:', err);
-    });
+      this.redis.on('error', (err) => {
+        console.error('[Redis] Error:', err);
+      });
+    }
   }
 
   async connect(): Promise<void> {
     try {
-      await this.redis.connect();
+      if (this.redis) {
+        await this.redis.connect();
+        console.log('[Redis] Connected successfully');
+      } else {
+        console.log('[Redis] Not configured, skipping Redis connection');
+      }
       await this.pool.connect();
       console.log('[DB] Database connections established');
     } catch (error) {
@@ -59,7 +68,9 @@ export class DatabaseManager {
 
   async disconnect(): Promise<void> {
     try {
-      await this.redis.disconnect();
+      if (this.redis) {
+        await this.redis.disconnect();
+      }
       await this.pool.end();
       console.log('[DB] Database connections closed');
     } catch (error) {
@@ -405,6 +416,10 @@ export class DatabaseManager {
   // ========== Redis Operations ==========
 
   async setCache(key: string, value: string, ttlSeconds?: number): Promise<void> {
+    if (!this.redis) {
+      console.warn('[Redis] Not available, skipping cache set');
+      return;
+    }
     if (ttlSeconds) {
       await this.redis.setEx(key, ttlSeconds, value);
     } else {
@@ -413,14 +428,26 @@ export class DatabaseManager {
   }
 
   async getCache(key: string): Promise<string | null> {
+    if (!this.redis) {
+      console.warn('[Redis] Not available, returning null for cache get');
+      return null;
+    }
     return await this.redis.get(key);
   }
 
   async deleteCache(key: string): Promise<void> {
+    if (!this.redis) {
+      console.warn('[Redis] Not available, skipping cache delete');
+      return;
+    }
     await this.redis.del(key);
   }
 
   async incrementRate(key: string, windowSeconds: number): Promise<number> {
+    if (!this.redis) {
+      console.warn('[Redis] Not available, returning 0 for rate limit');
+      return 0;
+    }
     const multi = this.redis.multi();
     multi.incr(key);
     multi.expire(key, windowSeconds);
@@ -429,11 +456,19 @@ export class DatabaseManager {
   }
 
   async checkIdempotency(key: string): Promise<boolean> {
+    if (!this.redis) {
+      console.warn('[Redis] Not available, allowing duplicate for idempotency');
+      return false;
+    }
     const exists = await this.redis.exists(key);
     return exists === 1;
   }
 
   async setIdempotencyKey(key: string, ttlSeconds = 300): Promise<void> {
+    if (!this.redis) {
+      console.warn('[Redis] Not available, skipping idempotency key set');
+      return;
+    }
     await this.redis.setEx(key, ttlSeconds, 'processed');
   }
 
@@ -442,11 +477,18 @@ export class DatabaseManager {
   async healthCheck(): Promise<{ postgres: boolean; redis: boolean }> {
     try {
       const pgResult = await this.pool.query('SELECT 1');
-      const redisResult = await this.redis.ping();
+      let redisHealthy = false;
+      
+      if (this.redis) {
+        const redisResult = await this.redis.ping();
+        redisHealthy = redisResult === 'PONG';
+      } else {
+        redisHealthy = true; // Consider healthy if not configured
+      }
       
       return {
         postgres: pgResult.rows[0]['?column?'] === 1,
-        redis: redisResult === 'PONG',
+        redis: redisHealthy,
       };
     } catch (error) {
       console.error('[DB] Health check failed:', error);
