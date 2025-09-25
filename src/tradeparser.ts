@@ -162,10 +162,18 @@ export class TradeParser {
   }
 
   private static extractSymbol(input: string): string | null {
+    // Keywords to exclude from symbol matching
+    const excludeKeywords = /^(buy|sell|market|limit|stop|close|long|short)$/i;
+    
     for (const pattern of this.SYMBOL_PATTERNS) {
-      const match = input.match(pattern);
-      if (match) {
+      // Find all matches, not just the first one
+      const matches = Array.from(input.matchAll(new RegExp(pattern, 'gi')));
+      for (const match of matches) {
         const symbol = match[1];
+        // Skip if it's an action keyword
+        if (excludeKeywords.test(symbol)) {
+          continue;
+        }
         // Ensure it ends with a quote asset if not already
         if (!/USDT?$|USD$|BUSD$/i.test(symbol)) {
           return `${symbol}USDT`;
