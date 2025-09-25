@@ -3,7 +3,7 @@ import { Telegraf, Context, Markup } from 'telegraf';
 import { Update } from 'telegraf/types';
 import express from 'express';
 
-import { BotConfig, BotConfigSchema, UserState } from './types';
+import { BotConfig, BotConfigSchema, UserState, TradeCommand, OrderBookDepth } from './types';
 import { DatabaseManager } from './db';
 import { EncryptionManager } from './encryption';
 import { AsterApiClient } from './aster';
@@ -284,6 +284,38 @@ ${TradeParser.generateExamples().map(ex => `• \`${ex}\``).join('\n')}
       
       await this.handlePanicCommand(ctx);
     });
+
+    // Default text handler for natural language commands and conversation states
+    this.bot.on('text', async (ctx) => {
+      const text = ctx.message.text.trim();
+      
+      // Skip commands that start with /
+      if (text.startsWith('/')) {
+        return;
+      }
+
+      // Handle conversation states first
+      if (ctx.userState?.conversationState) {
+        await this.handleConversationState(ctx, text);
+        return;
+      }
+
+      try {
+        const parseResult = TradeParser.parseTradeCommand(text.toLowerCase());
+        
+        if (parseResult.success && parseResult.command) {
+          await this.handleTradePreview(ctx, parseResult.command);
+        } else {
+          const errorMsg = parseResult.errors.length > 0 
+            ? parseResult.errors[0] 
+            : 'I didn\'t understand that.';
+          await ctx.reply(`❓ ${errorMsg}\n\nTry commands like:\n• \`buy 0.1 ETH 10x\`\n• \`sell 50u BTC\`\n• \`/help\` for more options`, { parse_mode: 'Markdown' });
+        }
+      } catch (error) {
+        console.error('Trade parsing error:', error);
+        await ctx.reply('❌ Error parsing your command. Please try again or use /help for guidance.');
+      }
+    });
   }
 
   private setupActions(): void {
@@ -352,6 +384,17 @@ ${TradeParser.generateExamples().map(ex => `• \`${ex}\``).join('\n')}
   private async handleLinkFlow(ctx: BotContext): Promise<void> {
     if (!ctx.userState) return;
 
+    if (ctx.userState.isLinked) {
+      await ctx.reply('✅ You already have API credentials linked. Use /unlink to remove them first.');
+      return;
+    }
+
+    // Set conversation state
+    ctx.userState.conversationState = {
+      step: 'waiting_api_key',
+      data: { pendingAction: 'link' }
+    };
+
     await ctx.reply(`
 🔗 **Link Your Aster API Credentials**
 
@@ -365,9 +408,182 @@ To enable trading, please provide your Aster API credentials:
 
 Please send your **API Key** now:
     `, { parse_mode: 'Markdown' });
+  }
 
-    // Implementation would handle the credential input flow
-    // This is a simplified version - full implementation would use conversation states
+  private async handleConversationState(ctx: BotContext, text: string): Promise<void> {
+    if (!ctx.userState?.conversationState) return;
+
+    const state = ctx.userState.conversationState;
+
+    try {
+      switch (state.step) {
+        case 'waiting_api_key':
+          await this.handleApiKeyInput(ctx, text);
+          break;
+        case 'waiting_api_secret':
+          await this.handleApiSecretInput(ctx, text);
+          break;
+        case 'waiting_pin':
+          await this.handlePinInput(ctx, text);
+          break;
+        case 'confirming_unlink':
+          await this.handleUnlinkConfirmation(ctx, text);
+          break;
+        default:
+          // Clear invalid state
+          ctx.userState.conversationState = undefined;
+          await ctx.reply('❌ Invalid conversation state. Please try again.');
+      }
+    } catch (error) {
+      console.error('Conversation state error:', error);
+      ctx.userState.conversationState = undefined;
+      await ctx.reply('❌ An error occurred. Please try again.');
+    }
+  }
+
+  private async handleApiKeyInput(ctx: BotContext, apiKey: string): Promise<void> {
+    if (!ctx.userState?.conversationState) return;
+
+    // Basic validation
+    if (!apiKey || apiKey.length < 10) {
+      await ctx.reply('❌ Invalid API key format. Please send a valid API key:');
+      return;
+    }
+
+    // Store API key temporarily
+    ctx.userState.conversationState.step = 'waiting_api_secret';
+    ctx.userState.conversationState.data!.apiKey = apiKey;
+
+    await ctx.reply(`✅ API Key received.\n\nNow please send your **API Secret**:`);
+  }
+
+  private async handleApiSecretInput(ctx: BotContext, apiSecret: string): Promise<void> {
+    if (!ctx.userState?.conversationState?.data?.apiKey) return;
+
+    // Basic validation
+    if (!apiSecret || apiSecret.length < 10) {
+      await ctx.reply('❌ Invalid API secret format. Please send a valid API secret:');
+      return;
+    }
+
+    const apiKey = ctx.userState.conversationState.data.apiKey;
+
+    try {
+      await ctx.reply('🔄 Validating credentials...');
+
+      // Create API client to test credentials
+      const testClient = new AsterApiClient(this.config.aster.baseUrl, apiKey, apiSecret);
+      const isValid = await testClient.validateApiCredentials();
+
+      if (!isValid) {
+        await ctx.reply('❌ Invalid API credentials. Please check your API key and secret and try again with /link');
+        ctx.userState.conversationState = undefined;
+        return;
+      }
+
+      // Encrypt and store credentials
+      const encryptedKey = this.encryption.encrypt(apiKey);
+      const encryptedSecret = this.encryption.encrypt(apiSecret);
+      
+      await this.db.storeApiCredentials(ctx.userState.userId, encryptedKey, encryptedSecret);
+      
+      // Update user state
+      ctx.userState.isLinked = true;
+      ctx.userState.conversationState = undefined;
+      
+      // Store API client in session
+      this.userSessions.set(ctx.userState.userId, testClient);
+      await this.db.updateLastOkAt(ctx.userState.userId);
+
+      await ctx.reply(`✅ **Credentials Linked Successfully!**\n\nYour API credentials have been encrypted and stored securely. You can now:\n\n• Execute trades with natural language\n• Monitor your positions\n• Check account balance\n• Set up risk management\n\n💡 Try: \`buy 0.1 ETH 5x\` or \`/positions\``);
+    } catch (error) {
+      console.error('API validation error:', error);
+      ctx.userState.conversationState = undefined;
+      await ctx.reply('❌ Failed to validate credentials. Please ensure they\'re correct and try again with /link');
+    }
+  }
+
+  private async handlePinInput(ctx: BotContext, pin: string): Promise<void> {
+    // PIN handling implementation would go here
+    // For now, clear the conversation state
+    if (ctx.userState) {
+      ctx.userState.conversationState = undefined;
+    }
+    await ctx.reply('🔐 PIN functionality not yet implemented.');
+  }
+
+  private async handleUnlinkConfirmation(ctx: BotContext, response: string): Promise<void> {
+    if (!ctx.userState?.conversationState) return;
+
+    const confirmation = response.toLowerCase().trim();
+    ctx.userState.conversationState = undefined;
+
+    if (confirmation === 'yes' || confirmation === 'y' || confirmation === 'confirm') {
+      await this.performUnlink(ctx);
+    } else {
+      await ctx.reply('❌ Unlink cancelled.');
+    }
+  }
+
+  private async handleTradePreview(ctx: BotContext, command: TradeCommand): Promise<void> {
+    if (!ctx.userState?.isLinked) {
+      await ctx.reply('❌ Please link your API credentials first using /link');
+      return;
+    }
+
+    try {
+      // Get API client to fetch order book
+      const apiClient = await this.getOrCreateApiClient(ctx.userState.userId);
+      
+      // For now, create a simple mock order book - in production, fetch real data
+      const mockOrderBook = {
+        lastUpdateId: Date.now(),
+        bids: [['45000', '1.0']],
+        asks: [['45100', '1.0']]
+      } as OrderBookDepth;
+
+      // Generate trade preview
+      const preview = await this.tradePreviewGenerator.generatePreview(
+        command,
+        mockOrderBook,
+        ctx.userState.settings
+      );
+
+      if (!preview.success || !preview.preview) {
+        const errorMsg = preview.errors.join('\n');
+        await ctx.reply(`❌ **Trade Error**\n\n${errorMsg}`);
+        return;
+      }
+
+      const trade = preview.preview;
+      
+      // Store pending trade
+      this.pendingTrades.set(ctx.userState.userId, trade);
+
+      const keyboard = Markup.inlineKeyboard([
+        [Markup.button.callback('✅ Confirm Trade', 'confirm_trade')],
+        [Markup.button.callback('❌ Cancel', 'cancel_trade')]
+      ]);
+
+      const message = `
+📈 **Trade Preview**
+
+**Action:** ${trade.side} ${trade.symbol}
+**Size:** ${trade.baseSize} ${trade.symbol.replace('USDT', '')} (~$${trade.quoteSize})
+**Leverage:** ${trade.leverage}x
+**Est. Price:** $${trade.estimatedPrice}
+**Est. Fees:** $${trade.estimatedFees}
+${trade.slippageWarning ? '\n⚠️ **High slippage warning**' : ''}
+${trade.maxSlippageExceeded ? '\n❌ **Max slippage exceeded**' : ''}
+
+⚠️ This action cannot be undone. Confirm to execute.
+      `;
+
+      await ctx.reply(message, { parse_mode: 'Markdown', ...keyboard });
+    } catch (error) {
+      console.error('Trade preview error:', error);
+      await ctx.reply('❌ Failed to generate trade preview. Please try again.');
+    }
   }
 
   private async performUnlink(ctx: BotContext): Promise<void> {
