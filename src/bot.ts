@@ -626,10 +626,10 @@ ${trade.maxSlippageExceeded ? '\n❌ **Max slippage exceeded**' : ''}
     if (!('text' in message!)) return;
 
     const commandText = message.text;
-    // Remove the command prefix (/buy or /sell) and parse just the parameters
-    const textWithoutCommand = commandText.replace(/^\/(?:buy|sell)\s*/i, '').trim();
-    const fullTradeText = `${side.toLowerCase()} ${textWithoutCommand}`;
-    const parseResult = TradeParser.parseTradeCommand(fullTradeText);
+    console.log('[DEBUG] Parsing command:', commandText);
+    // For /buy and /sell commands, use the original text since TradeParser expects /buy or /sell prefix
+    const parseResult = TradeParser.parseTradeCommand(commandText);
+    console.log('[DEBUG] Parse result:', parseResult);
     
     if (!parseResult.success) {
       const errorText = [
