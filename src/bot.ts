@@ -55,6 +55,27 @@ class AsterTradingBot {
     this.setupServer();
   }
 
+  private async initializeExchangeInfo(): Promise<void> {
+    try {
+      console.log('[FiltersManager] Loading exchange info...');
+      // Create a temporary API client to get exchange info
+      const tempClient = new AsterApiClient(this.config.aster.baseUrl, '', '');
+      const exchangeInfo = await tempClient.getExchangeInfo();
+      
+      console.log(`[FiltersManager] Loaded ${exchangeInfo.symbols.length} symbols`);
+      
+      // Load filters for all symbols
+      for (const symbolInfo of exchangeInfo.symbols) {
+        this.filtersManager.loadSymbolFilters(symbolInfo);
+      }
+      
+      console.log('[FiltersManager] Exchange info initialized successfully');
+    } catch (error) {
+      console.error('[FiltersManager] Failed to load exchange info:', error);
+      throw error;
+    }
+  }
+
   private loadConfig(): BotConfig {
     const config = {
       telegram: {
@@ -916,6 +937,9 @@ ${trade.maxSlippageExceeded ? '\n❌ **Max slippage exceeded**' : ''}
       if (!EncryptionManager.test(this.config.encryption.key)) {
         throw new Error('Encryption test failed');
       }
+
+      // Initialize exchange info for filters
+      await this.initializeExchangeInfo();
 
       // Start notification manager
       await this.notificationManager.start(this.bot);
