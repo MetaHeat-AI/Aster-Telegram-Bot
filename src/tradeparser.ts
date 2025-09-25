@@ -197,22 +197,41 @@ export class TradeParser {
       };
     }
 
-    // Check for base notation (plain number)
-    const baseMatch = input.match(/\b(\d+(?:\.\d+)?)\b(?!\s*[xu%])/);
-    console.log('[DEBUG] baseMatch:', baseMatch);
-    if (baseMatch) {
-      // Make sure it's not part of leverage or percentage
+    // Check for base notation (plain number) - find all matches and pick the best one
+    const baseMatches = Array.from(input.matchAll(/\b(\d+(?:\.\d+)?)\b/g));
+    console.log('[DEBUG] baseMatches:', baseMatches);
+    
+    for (const baseMatch of baseMatches) {
+      const matchedNumber = baseMatch[1];
       const beforeMatch = input.substring(0, baseMatch.index || 0);
       const afterMatch = input.substring((baseMatch.index || 0) + baseMatch[0].length);
-      console.log('[DEBUG] beforeMatch:', beforeMatch, 'afterMatch:', afterMatch);
+      console.log(`[DEBUG] Testing ${matchedNumber}: beforeMatch='${beforeMatch}', afterMatch='${afterMatch}'`);
       
-      // Check if this number is immediately followed by leverage/quote/percentage indicators
-      // We want to reject '5' in '5x' but accept '0.1' in '0.1 ETH 5x'
-      const isImmediatelyFollowedByIndicator = afterMatch.match(/^\s*x\d*$/i) || // 5x, 10x
-                                               afterMatch.match(/^\s*[%]/) || // 1%, 2%
-                                               beforeMatch.match(/[sl|tp|trail]\s*$/i); // sl1, tp2
+      // Skip if this number is part of leverage (5x), percentage (1%), or risk management
+      const isPartOfLeverage = afterMatch.match(/^\s*x\b/i); // 5x, 10x (but not 0.1x)
+      const isPartOfPercentage = afterMatch.match(/^\s*%/); // 1%, 2%
+      const isPartOfRiskManagement = beforeMatch.match(/[sl|tp|trail]\s*$/i); // sl1, tp2
       
-      if (!isImmediatelyFollowedByIndicator) {
+      if (!isPartOfLeverage && !isPartOfPercentage && !isPartOfRiskManagement) {
+        console.log(`[DEBUG] Found valid base size: ${matchedNumber}`);
+        return {
+          size: matchedNumber,
+          type: 'BASE',
+        };
+      } else {
+        console.log(`[DEBUG] Skipping ${matchedNumber} - part of leverage/percentage/risk management`);
+      }
+    }
+    
+    // If we get here, check the old logic as fallback
+    const baseMatch = input.match(/\b(\d+(?:\.\d+)?)\b(?!\s*[xu%])/);
+    console.log('[DEBUG] fallback baseMatch:', baseMatch);
+    if (baseMatch) {
+      const beforeMatch = input.substring(0, baseMatch.index || 0);
+      const afterMatch = input.substring((baseMatch.index || 0) + baseMatch[0].length);
+      console.log('[DEBUG] fallback beforeMatch:', beforeMatch, 'afterMatch:', afterMatch);
+      
+      if (!afterMatch.match(/^\s*[xu%]/) && !beforeMatch.match(/[sl|tp|trail]\s*$/i)) {
         console.log('[DEBUG] Found valid base size:', baseMatch[1]);
         return {
           size: baseMatch[1],
