@@ -21,10 +21,21 @@ export class DatabaseManager {
       connectionTimeoutMillis: 2000,
     });
 
-    if (redisUrl) {
-      this.redis = createClient({
-        url: redisUrl,
-      }) as RedisClientType;
+    if (redisUrl && redisUrl.startsWith('redis://') && !redisUrl.includes('localhost:6379')) {
+      try {
+        this.redis = createClient({
+          url: redisUrl,
+          socket: {
+            connectTimeout: 5000,
+            reconnectStrategy: false, // Disable automatic reconnection
+          }
+        }) as RedisClientType;
+      } catch (error) {
+        console.warn('[Redis] Failed to create client, continuing without Redis:', error);
+        this.redis = undefined;
+      }
+    } else {
+      console.log('[Redis] URL not provided or localhost detected, Redis disabled');
     }
 
     this.setupEventHandlers();
