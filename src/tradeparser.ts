@@ -185,8 +185,11 @@ export class TradeParser {
   }
 
   private static extractSize(input: string): { size: string; type: 'BASE' | 'QUOTE' } | null {
+    console.log('[DEBUG] extractSize input:', input);
+    
     // Check for quote notation first (100u, 100usdt)
     const quoteMatch = input.match(/(\d+(?:\.\d+)?)(?:u|usdt?|usd|busd)\b/i);
+    console.log('[DEBUG] quoteMatch:', quoteMatch);
     if (quoteMatch) {
       return {
         size: quoteMatch[1],
@@ -196,19 +199,27 @@ export class TradeParser {
 
     // Check for base notation (plain number)
     const baseMatch = input.match(/\b(\d+(?:\.\d+)?)\b(?!\s*[xu%])/);
+    console.log('[DEBUG] baseMatch:', baseMatch);
     if (baseMatch) {
       // Make sure it's not part of leverage or percentage
       const beforeMatch = input.substring(0, baseMatch.index || 0);
       const afterMatch = input.substring((baseMatch.index || 0) + baseMatch[0].length);
+      console.log('[DEBUG] beforeMatch:', beforeMatch, 'afterMatch:', afterMatch);
       
       if (!afterMatch.match(/^\s*[xu%]/) && !beforeMatch.match(/[sl|tp|trail]\s*$/i)) {
+        console.log('[DEBUG] Found valid base size:', baseMatch[1]);
         return {
           size: baseMatch[1],
           type: 'BASE',
         };
+      } else {
+        console.log('[DEBUG] Base match rejected due to context');
       }
+    } else {
+      console.log('[DEBUG] No base match found');
     }
 
+    console.log('[DEBUG] extractSize returning null');
     return null;
   }
 
