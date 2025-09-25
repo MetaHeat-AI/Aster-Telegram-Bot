@@ -27,16 +27,20 @@ export class EncryptionManager {
       const derivedKey = crypto.pbkdf2Sync(this.encryptionKey, salt, 100000, 32, 'sha512');
       
       // Create cipher
-      const cipher = crypto.createCipher('aes-256-cbc', derivedKey);
+      const cipher = crypto.createCipheriv(EncryptionManager.ALGORITHM, derivedKey, iv);
       
       // Encrypt the plaintext
       let encrypted = cipher.update(plaintext, 'utf8', 'hex');
       encrypted += cipher.final('hex');
       
-      // Combine all components: salt + iv + encrypted
+      // Get the authentication tag
+      const tag = cipher.getAuthTag();
+      
+      // Combine all components: salt + iv + tag + encrypted
       const combined = Buffer.concat([
         salt,
         iv,
+        tag,
         Buffer.from(encrypted, 'hex')
       ]);
       
@@ -58,15 +62,20 @@ export class EncryptionManager {
         EncryptionManager.SALT_LENGTH, 
         EncryptionManager.SALT_LENGTH + EncryptionManager.IV_LENGTH
       );
+      const tag = combined.subarray(
+        EncryptionManager.SALT_LENGTH + EncryptionManager.IV_LENGTH,
+        EncryptionManager.SALT_LENGTH + EncryptionManager.IV_LENGTH + EncryptionManager.TAG_LENGTH
+      );
       const encrypted = combined.subarray(
-        EncryptionManager.SALT_LENGTH + EncryptionManager.IV_LENGTH
+        EncryptionManager.SALT_LENGTH + EncryptionManager.IV_LENGTH + EncryptionManager.TAG_LENGTH
       );
       
       // Derive key using same salt
       const derivedKey = crypto.pbkdf2Sync(this.encryptionKey, salt, 100000, 32, 'sha512');
       
       // Create decipher
-      const decipher = crypto.createDecipher('aes-256-cbc', derivedKey);
+      const decipher = crypto.createDecipheriv(EncryptionManager.ALGORITHM, derivedKey, iv);
+      decipher.setAuthTag(tag);
       
       // Decrypt
       let decrypted = decipher.update(encrypted, undefined, 'utf8');
