@@ -173,10 +173,16 @@ export class AsterApiClient {
   }
 
   async getOrderBook(symbol: string, limit = 100): Promise<OrderBookDepth> {
-    const response = await this.axios.get<OrderBookDepth>('/fapi/v1/depth', {
-      params: { symbol, limit }
-    });
-    return response.data;
+    try {
+      console.log(`[API] GET /fapi/v1/depth?symbol=${symbol}&limit=${limit}`);
+      const response = await this.axios.get<OrderBookDepth>('/fapi/v1/depth', {
+        params: { symbol, limit }
+      });
+      return response.data;
+    } catch (error) {
+      console.error(`[API] Failed to get order book for ${symbol}:`, error);
+      throw this.handleApiError(error as AxiosError);
+    }
   }
 
   async getAccountInfo(): Promise<AccountInfo> {

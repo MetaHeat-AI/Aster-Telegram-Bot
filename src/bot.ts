@@ -740,9 +740,16 @@ ${trade.maxSlippageExceeded ? '\n❌ **Max slippage exceeded**' : ''}
       const preview = pendingTrade.preview;
       
       // Set leverage before placing order
+      console.log(`[DEBUG] Setting leverage for ${preview.symbol} to ${preview.leverage}x`);
       await apiClient.changeLeverage(preview.symbol, preview.leverage);
       
       // Execute the trade
+      console.log(`[DEBUG] Placing order:`, {
+        symbol: preview.symbol,
+        side: preview.side,
+        type: preview.command.orderType || 'MARKET',
+        quantity: preview.baseSize
+      });
       const orderResponse = await apiClient.createOrder({
         symbol: preview.symbol,
         side: preview.side,
