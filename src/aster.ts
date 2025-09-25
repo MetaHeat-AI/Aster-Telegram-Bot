@@ -191,6 +191,31 @@ export class AsterApiClient {
     return response.data;
   }
 
+  async changeLeverage(symbol: string, leverage: number): Promise<any> {
+    try {
+      const params = {
+        symbol,
+        leverage: leverage.toString(),
+      };
+      
+      const signedRequest = AsterSigner.signPostRequest('/fapi/v1/leverage', params, this.apiSecret);
+      const formData = new URLSearchParams(signedRequest.queryString);
+      
+      console.log(`[API] POST /fapi/v1/leverage`);
+      const response = await this.axios.post('/fapi/v1/leverage', formData, {
+        headers: {
+          'X-MBX-APIKEY': this.apiKey,
+          'Content-Type': 'application/x-www-form-urlencoded'
+        }
+      });
+      
+      console.log(`[API] Changed leverage for ${symbol} to ${leverage}x`);
+      return response.data;
+    } catch (error) {
+      throw this.handleApiError(error as AxiosError);
+    }
+  }
+
   async createOrder(orderParams: Partial<NewOrderRequest>): Promise<OrderResponse> {
     if (!orderParams.symbol || !orderParams.side || !orderParams.type) {
       throw new Error('Missing required order parameters: symbol, side, type');

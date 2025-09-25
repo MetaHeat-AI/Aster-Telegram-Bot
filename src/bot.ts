@@ -739,6 +739,9 @@ ${trade.maxSlippageExceeded ? '\n❌ **Max slippage exceeded**' : ''}
       const apiClient = await this.getOrCreateApiClient(ctx.userState.userId);
       const preview = pendingTrade.preview;
       
+      // Set leverage before placing order
+      await apiClient.changeLeverage(preview.symbol, preview.leverage);
+      
       // Execute the trade
       const orderResponse = await apiClient.createOrder({
         symbol: preview.symbol,
