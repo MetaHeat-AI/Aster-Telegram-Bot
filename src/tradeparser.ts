@@ -206,7 +206,13 @@ export class TradeParser {
       const afterMatch = input.substring((baseMatch.index || 0) + baseMatch[0].length);
       console.log('[DEBUG] beforeMatch:', beforeMatch, 'afterMatch:', afterMatch);
       
-      if (!afterMatch.match(/^\s*[xu%]/) && !beforeMatch.match(/[sl|tp|trail]\s*$/i)) {
+      // Check if this number is immediately followed by leverage/quote/percentage indicators
+      // We want to reject '5' in '5x' but accept '0.1' in '0.1 ETH 5x'
+      const isImmediatelyFollowedByIndicator = afterMatch.match(/^\s*x\d*$/i) || // 5x, 10x
+                                               afterMatch.match(/^\s*[%]/) || // 1%, 2%
+                                               beforeMatch.match(/[sl|tp|trail]\s*$/i); // sl1, tp2
+      
+      if (!isImmediatelyFollowedByIndicator) {
         console.log('[DEBUG] Found valid base size:', baseMatch[1]);
         return {
           size: baseMatch[1],
