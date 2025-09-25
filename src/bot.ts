@@ -299,6 +299,11 @@ ${TradeParser.generateExamples().map(ex => `• \`${ex}\``).join('\n')}
       await this.handlePriceCommand(ctx, symbol);
     });
 
+    // Trade command - main trading interface
+    this.bot.command('trade', async (ctx) => {
+      await this.handleTradeInterface(ctx);
+    });
+
     // Admin panic command
     this.bot.command('panic', async (ctx) => {
       if (!this.config.telegram.adminIds.includes(ctx.from?.id || 0)) {
@@ -363,6 +368,52 @@ ${TradeParser.generateExamples().map(ex => `• \`${ex}\``).join('\n')}
       
       this.pendingTrades.delete(ctx.userState.userId);
       await ctx.editMessageText('❌ Trade cancelled.');
+    });
+
+    // Trading interface actions
+    this.bot.action('trade_buy', async (ctx) => {
+      await this.handleSymbolSelection(ctx, 'BUY');
+    });
+
+    this.bot.action('trade_sell', async (ctx) => {
+      await this.handleSymbolSelection(ctx, 'SELL');
+    });
+
+    this.bot.action(/^symbol_(.+)_(.+)$/, async (ctx) => {
+      const side = ctx.match[1] as 'BUY' | 'SELL';
+      const symbol = ctx.match[2];
+      await this.handleQuantitySelection(ctx, side, symbol);
+    });
+
+    this.bot.action(/^qty_(.+)_(.+)_(.+)$/, async (ctx) => {
+      const side = ctx.match[1] as 'BUY' | 'SELL';
+      const symbol = ctx.match[2];
+      const quantity = ctx.match[3];
+      await this.handleLeverageSelection(ctx, side, symbol, quantity);
+    });
+
+    this.bot.action(/^lev_(.+)_(.+)_(.+)_(.+)$/, async (ctx) => {
+      const side = ctx.match[1] as 'BUY' | 'SELL';
+      const symbol = ctx.match[2];
+      const quantity = ctx.match[3];
+      const leverage = ctx.match[4];
+      await this.handleButtonTradeConfirmation(ctx, side, symbol, quantity, leverage);
+    });
+
+    this.bot.action('trade_back', async (ctx) => {
+      await this.handleTradeInterface(ctx);
+    });
+
+    this.bot.action('positions', async (ctx) => {
+      await this.handlePositionsCommand(ctx);
+    });
+
+    this.bot.action('balance', async (ctx) => {
+      await this.handleBalanceCommand(ctx);
+    });
+
+    this.bot.action('settings', async (ctx) => {
+      await ctx.editMessageText('Settings menu (under construction)');
     });
 
     // Position management actions
@@ -908,6 +959,160 @@ ${trade.maxSlippageExceeded ? '\n❌ **Max slippage exceeded**' : ''}
   private async handlePositionAction(ctx: BotContext, action: string, symbol: string): Promise<void> {
     // Implementation would handle position management actions
     await ctx.reply(`Position action: ${action} for ${symbol} (Implementation needed)`);
+  }
+
+  // === BUTTON-BASED TRADING INTERFACE ===
+  
+  private async handleTradeInterface(ctx: BotContext): Promise<void> {
+    if (!ctx.userState?.isLinked) {
+      await ctx.reply('❌ Please link your API credentials first using /link');
+      return;
+    }
+
+    const keyboard = Markup.inlineKeyboard([
+      [
+        Markup.button.callback('🟢 BUY', 'trade_buy'),
+        Markup.button.callback('🔴 SELL', 'trade_sell')
+      ],
+      [
+        Markup.button.callback('📊 Positions', 'positions'),
+        Markup.button.callback('💰 Balance', 'balance')
+      ],
+      [
+        Markup.button.callback('⚙️ Settings', 'settings')
+      ]
+    ]);
+
+    const message = `
+🎯 **Trading Interface**
+
+Choose an action to get started:
+
+• **Buy** - Open long positions
+• **Sell** - Open short positions or close longs
+• **Positions** - View your open positions
+• **Balance** - Check your account balance
+    `;
+
+    if (ctx.callbackQuery) {
+      await ctx.editMessageText(message, { parse_mode: 'Markdown', ...keyboard });
+    } else {
+      await ctx.reply(message, { parse_mode: 'Markdown', ...keyboard });
+    }
+  }
+
+  private async handleSymbolSelection(ctx: BotContext, side: 'BUY' | 'SELL'): Promise<void> {
+    const popularSymbols = ['BTCUSDT', 'ETHUSDT', 'SOLUSDT', 'ADAUSDT', 'DOGEUSDT', 'LINKUSDT'];
+    
+    const keyboard = Markup.inlineKeyboard([
+      ...popularSymbols.map(symbol => [
+        Markup.button.callback(`${symbol.replace('USDT', '')}`, `symbol_${side}_${symbol}`)
+      ]),
+      [Markup.button.callback('🔙 Back', 'trade_back')]
+    ]);
+
+    const actionText = side === 'BUY' ? '🟢 Buy' : '🔴 Sell';
+    const message = `${actionText} - Select Symbol\n\nChoose the cryptocurrency you want to trade:`;
+
+    await ctx.editMessageText(message, { ...keyboard });
+  }
+
+  private async handleQuantitySelection(ctx: BotContext, side: 'BUY' | 'SELL', symbol: string): Promise<void> {
+    const presetQuantities = ['0.01', '0.1', '0.25', '0.5', '1.0'];
+    
+    const keyboard = Markup.inlineKeyboard([
+      ...presetQuantities.map(qty => [
+        Markup.button.callback(`${qty} ${symbol.replace('USDT', '')}`, `qty_${side}_${symbol}_${qty}`)
+      ]),
+      [Markup.button.callback('🔙 Back', 'trade_back')]
+    ]);
+
+    const actionText = side === 'BUY' ? '🟢 Buy' : '🔴 Sell';
+    const message = `${actionText} ${symbol.replace('USDT', '')} - Select Quantity\n\nChoose the amount you want to trade:`;
+
+    await ctx.editMessageText(message, { ...keyboard });
+  }
+
+  private async handleLeverageSelection(ctx: BotContext, side: 'BUY' | 'SELL', symbol: string, quantity: string): Promise<void> {
+    const leverageOptions = ['2', '5', '10', '20'];
+    
+    const keyboard = Markup.inlineKeyboard([
+      leverageOptions.map(lev => 
+        Markup.button.callback(`${lev}x`, `lev_${side}_${symbol}_${quantity}_${lev}`)
+      ),
+      [Markup.button.callback('🔙 Back', 'trade_back')]
+    ]);
+
+    const actionText = side === 'BUY' ? '🟢 Buy' : '🔴 Sell';
+    const message = `${actionText} ${quantity} ${symbol.replace('USDT', '')} - Select Leverage\n\nChoose your leverage:`;
+
+    await ctx.editMessageText(message, { ...keyboard });
+  }
+
+  private async handleButtonTradeConfirmation(ctx: BotContext, side: 'BUY' | 'SELL', symbol: string, quantity: string, leverage: string): Promise<void> {
+    if (!ctx.userState) return;
+
+    try {
+      // Create trade command object
+      const tradeCommand: TradeCommand = {
+        action: side,
+        symbol: symbol,
+        size: quantity,
+        sizeType: 'BASE',
+        leverage: parseInt(leverage),
+        orderType: 'MARKET',
+        reduceOnly: false
+      };
+
+      // Generate preview using existing logic
+      const apiClient = await this.getOrCreateApiClient(ctx.userState.userId);
+      const orderBook = await apiClient.getOrderBook(symbol);
+      
+      const previewResult = await this.tradePreviewGenerator.generatePreview(
+        tradeCommand,
+        orderBook,
+        ctx.userState.settings
+      );
+
+      if (!previewResult.success || !previewResult.preview) {
+        const errorMsg = previewResult.errors.join('\n');
+        await ctx.editMessageText(`❌ **Preview Error**\n\n${errorMsg}`);
+        return;
+      }
+
+      const preview = previewResult.preview;
+      
+      // Store pending trade
+      this.pendingTrades.set(ctx.userState.userId, { preview, timestamp: Date.now() });
+
+      const actionText = side === 'BUY' ? '🟢 BUY' : '🔴 SELL';
+      const keyboard = Markup.inlineKeyboard([
+        [
+          Markup.button.callback('✅ Confirm Trade', 'confirm_trade'),
+          Markup.button.callback('❌ Cancel', 'trade_back')
+        ]
+      ]);
+
+      const message = `
+🎯 **Trade Confirmation**
+
+**Action:** ${actionText} ${preview.symbol.replace('USDT', '')}
+**Size:** ${preview.baseSize} ${preview.symbol.replace('USDT', '')} (~$${preview.quoteSize})
+**Leverage:** ${preview.leverage}x
+**Est. Price:** $${preview.estimatedPrice}
+**Est. Fees:** $${preview.estimatedFees}
+${preview.slippageWarning ? '\n⚠️ **High slippage warning**' : ''}
+${preview.maxSlippageExceeded ? '\n❌ **Max slippage exceeded**' : ''}
+
+⚠️ **This action cannot be undone. Confirm to execute.**
+      `;
+
+      await ctx.editMessageText(message, { parse_mode: 'Markdown', ...keyboard });
+      
+    } catch (error) {
+      console.error('Button trade confirmation error:', error);
+      await ctx.editMessageText('❌ Failed to generate trade preview. Please try again.');
+    }
   }
 
   private async getOrCreateApiClient(userId: number): Promise<AsterApiClient> {
