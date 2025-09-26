@@ -13,6 +13,7 @@ import { SettingsManager } from './settings';
 import { TradeParser, TradePreviewGenerator } from './tradeparser';
 import { NotificationManager } from './notifications';
 import { PnLCalculator } from './pnl';
+import { SymbolService } from './services/SymbolService';
 
 // Load environment variables
 dotenv.config();
@@ -36,6 +37,7 @@ class AsterTradingBot {
   private userSessions = new Map<number, AsterApiClient>();
   private pendingTrades = new Map<number, any>();
   private conversationStates = new Map<number, UserState['conversationState']>();
+  private symbolServices = new Map<number, SymbolService>();
 
   constructor() {
     this.config = this.loadConfig();
@@ -795,6 +797,14 @@ Please send your **API Key** now:
     this.conversationStates.delete(userId);
   }
 
+  private async getSymbolService(userId: number): Promise<SymbolService> {
+    if (!this.symbolServices.has(userId)) {
+      const apiClient = await this.getOrCreateApiClient(userId);
+      this.symbolServices.set(userId, new SymbolService(apiClient));
+    }
+    return this.symbolServices.get(userId)!;
+  }
+
   private async handleCustomPairInput(ctx: BotContext, text: string): Promise<void> {
     if (!ctx.userState?.conversationState?.data) return;
 
@@ -811,10 +821,24 @@ Please send your **API Key** now:
     }
 
     try {
-      // Check if symbol exists by trying to get current price
-      const currentPrice = await this.getCurrentPrice(symbol);
-      if (currentPrice === 0) {
-        await ctx.reply(`❌ Symbol ${symbol} not found or not available for trading. Please check the symbol name and try again.`);
+      // Use SymbolService to validate symbol availability
+      const symbolService = await this.getSymbolService(ctx.userState.userId);
+      const isAvailable = await symbolService.isSymbolAvailable(symbol, tradingType === 'spot' ? 'spot' : 'futures');
+      
+      if (!isAvailable) {
+        const availableFor = tradingType === 'spot' ? 'spot trading' : 'futures trading';
+        const suggestions = await symbolService.getTopSymbolsByVolume(5, tradingType === 'spot' ? 'spot' : 'futures');
+        
+        let suggestionText = '';
+        if (suggestions.length > 0) {
+          suggestionText = '\n\n**Available symbols:**\n';
+          suggestions.slice(0, 3).forEach(s => {
+            const emoji = symbolService.getSymbolEmoji(s.symbol);
+            suggestionText += `• ${emoji} ${s.symbol}\n`;
+          });
+        }
+        
+        await ctx.reply(`❌ Symbol ${symbol} is not available for ${availableFor}.${suggestionText}`);
         return;
       }
 

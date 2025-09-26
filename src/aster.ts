@@ -379,6 +379,47 @@ export class AsterApiClient {
     return response.data;
   }
 
+  async getAllFuturesTickers(): Promise<Array<{
+    symbol: string;
+    lastPrice: string;
+    volume: string;
+    quoteVolume: string;
+    priceChangePercent: string;
+  }>> {
+    try {
+      const response = await this.axios.get('/fapi/v1/ticker/24hr');
+      return response.data;
+    } catch (error) {
+      console.error('[FUTURES API] Failed to get all tickers:', error);
+      return [];
+    }
+  }
+
+  async getAllSpotTickers(): Promise<Array<{
+    symbol: string;
+    lastPrice: string;
+    volume: string;
+    quoteVolume: string;
+    priceChangePercent: string;
+  }>> {
+    const spotBaseUrl = 'https://sapi.asterdex.com';
+    const spotAxios = axios.create({ 
+      baseURL: spotBaseUrl,
+      headers: {
+        'X-MBX-APIKEY': this.apiKey,
+        'Content-Type': 'application/json'
+      }
+    });
+    
+    try {
+      const response = await spotAxios.get('/api/v1/ticker/24hr');
+      return response.data;
+    } catch (error) {
+      console.error('[SPOT API] Failed to get all tickers:', error);
+      return [];
+    }
+  }
+
   async getMyTrades(symbol: string, limit = 500): Promise<any[]> {
     const params = { symbol, limit: limit.toString() };
     const signedRequest = AsterSigner.signGetRequest('/api/v3/myTrades', params, this.apiSecret);

@@ -2,6 +2,7 @@ import { Markup } from 'telegraf';
 import { BaseHandler, BotContext } from './BaseHandler';
 import { BotEventEmitter, EventTypes } from '../events/EventEmitter';
 import { AsterApiClient } from '../aster';
+import { SymbolService } from '../services/SymbolService';
 
 export interface TradingHandlerDependencies {
   eventEmitter: BotEventEmitter;
@@ -24,11 +25,20 @@ export interface PriceService {
 export class TradingHandler extends BaseHandler {
   private apiClientService: ApiClientService;
   private priceService: PriceService;
+  private symbolService: SymbolService | null = null;
 
   constructor(dependencies: TradingHandlerDependencies) {
     super(dependencies.eventEmitter);
     this.apiClientService = dependencies.apiClientService;
     this.priceService = dependencies.priceService;
+  }
+
+  private async getSymbolService(userId: number): Promise<SymbolService> {
+    if (!this.symbolService) {
+      const apiClient = await this.apiClientService.getOrCreateClient(userId);
+      this.symbolService = new SymbolService(apiClient);
+    }
+    return this.symbolService;
   }
 
   async handleSpotTrading(ctx: BotContext, customSymbol?: string): Promise<void> {
@@ -132,45 +142,70 @@ export class TradingHandler extends BaseHandler {
   }
 
   private async showSpotTradingInterface(ctx: BotContext, availableUsdt: number): Promise<void> {
-    const spotText = `
+    const symbolService = await this.getSymbolService(ctx.userState!.userId);
+    const topSpotSymbols = await symbolService.getTopSymbolsByVolume(4, 'spot');
+
+    let spotText = `
 🏪 **Spot Trading Interface**
 
 💰 **Available USDT:** $${availableUsdt.toFixed(2)}
 
-**Popular Pairs:**
-• BTCUSDT - Bitcoin
-• ETHUSDT - Ethereum
-• SOLUSDT - Solana
+**Top Spot Pairs:**`;
 
-**Quick Actions:**
-    `.trim();
+    // Add top symbols to text
+    topSpotSymbols.slice(0, 3).forEach(symbol => {
+      const emoji = symbolService.getSymbolEmoji(symbol.symbol);
+      const name = symbolService.getCleanSymbolName(symbol.symbol);
+      const price = parseFloat(symbol.lastPrice).toFixed(4);
+      const change = parseFloat(symbol.priceChangePercent).toFixed(2);
+      const changeEmoji = parseFloat(symbol.priceChangePercent) >= 0 ? '🟢' : '🔴';
+      spotText += `\n• ${emoji} ${symbol.symbol} - $${price} ${changeEmoji}${change}%`;
+    });
 
-    const keyboard = Markup.inlineKeyboard([
-      // Popular Coins (Clean 2x2 grid)
-      [
-        Markup.button.callback('₿ Bitcoin', 'spot_buy_BTCUSDT'),
-        Markup.button.callback('⟠ Ethereum', 'spot_buy_ETHUSDT')
-      ],
-      [
-        Markup.button.callback('◎ Solana', 'spot_buy_SOLUSDT'),
-        Markup.button.callback('🪙 Aster', 'spot_buy_ASTERUSDT')
-      ],
-      // Actions
-      [
-        Markup.button.callback('🎯 Custom Pair', 'spot_custom_pair')
-      ],
-      [
-        Markup.button.callback('💱 Sell Assets', 'spot_sell_menu')
-      ],
-      [
-        Markup.button.callback('💰 Balance', 'balance')
-      ],
-      // Navigation
-      [
-        Markup.button.callback('⚡ Switch to Perps', 'trade_perps'),
-        Markup.button.callback('🔙 Back', 'unified_trade')
-      ]
+    spotText += `\n\n**Quick Actions:**`;
+
+    const keyboardRows = [];
+
+    // Create buttons from top symbols (2x2 grid)
+    const buttonSymbols = topSpotSymbols.slice(0, 4);
+    for (let i = 0; i < buttonSymbols.length; i += 2) {
+      const row = [];
+      
+      if (buttonSymbols[i]) {
+        const symbol = buttonSymbols[i];
+        const emoji = symbolService.getSymbolEmoji(symbol.symbol);
+        const name = symbolService.getCleanSymbolName(symbol.symbol);
+        row.push(Markup.button.callback(`${emoji} ${name}`, `spot_buy_${symbol.symbol}`));
+      }
+      
+      if (buttonSymbols[i + 1]) {
+        const symbol = buttonSymbols[i + 1];
+        const emoji = symbolService.getSymbolEmoji(symbol.symbol);
+        const name = symbolService.getCleanSymbolName(symbol.symbol);
+        row.push(Markup.button.callback(`${emoji} ${name}`, `spot_buy_${symbol.symbol}`));
+      }
+      
+      keyboardRows.push(row);
+    }
+
+    // Add action buttons
+    keyboardRows.push([
+      Markup.button.callback('🎯 Custom Pair', 'spot_custom_pair')
     ]);
+    keyboardRows.push([
+      Markup.button.callback('💱 Sell Assets', 'spot_sell_menu')
+    ]);
+    keyboardRows.push([
+      Markup.button.callback('💰 Balance', 'balance')
+    ]);
+
+    // Navigation
+    keyboardRows.push([
+      Markup.button.callback('⚡ Switch to Perps', 'trade_perps'),
+      Markup.button.callback('🔙 Back', 'unified_trade')
+    ]);
+
+    const keyboard = Markup.inlineKeyboard(keyboardRows);
 
     try {
       await ctx.editMessageText(spotText, { parse_mode: 'Markdown', ...keyboard });
@@ -185,51 +220,59 @@ export class TradingHandler extends BaseHandler {
     accountInfo: any
   ): Promise<void> {
     const totalWallet = parseFloat(accountInfo.totalWalletBalance || '0');
-    
-    const perpsText = `
+    const symbolService = await this.getSymbolService(ctx.userState!.userId);
+    const topFuturesSymbols = await symbolService.getTopSymbolsByVolume(3, 'futures');
+
+    let perpsText = `
 ⚡ **Perps Trading Interface**
 
 💰 **Available Balance:** $${availableBalance.toFixed(2)}
 📊 **Total Wallet:** $${totalWallet.toFixed(2)}
 
-**Popular Perps:**
-• BTCUSDT - Bitcoin Perpetual
-• ETHUSDT - Ethereum Perpetual
-• SOLUSDT - Solana Perpetual
+**Top Futures Pairs:**`;
 
-**Quick Actions:**
-    `.trim();
+    // Add top symbols to text
+    topFuturesSymbols.forEach(symbol => {
+      const emoji = symbolService.getSymbolEmoji(symbol.symbol);
+      const name = symbolService.getCleanSymbolName(symbol.symbol);
+      const price = parseFloat(symbol.lastPrice).toFixed(4);
+      const change = parseFloat(symbol.priceChangePercent).toFixed(2);
+      const changeEmoji = parseFloat(symbol.priceChangePercent) >= 0 ? '🟢' : '🔴';
+      perpsText += `\n• ${emoji} ${symbol.symbol} - $${price} ${changeEmoji}${change}%`;
+    });
 
-    const keyboard = Markup.inlineKeyboard([
-      // Popular Perps
-      [
-        Markup.button.callback('📈 Long BTC', 'perps_buy_BTCUSDT'),
-        Markup.button.callback('📉 Short BTC', 'perps_sell_BTCUSDT')
-      ],
-      [
-        Markup.button.callback('📈 Long ETH', 'perps_buy_ETHUSDT'),
-        Markup.button.callback('📉 Short ETH', 'perps_sell_ETHUSDT')
-      ],
-      [
-        Markup.button.callback('📈 Long SOL', 'perps_buy_SOLUSDT'),
-        Markup.button.callback('📉 Short SOL', 'perps_sell_SOLUSDT')
-      ],
-      // Actions
-      [
-        Markup.button.callback('🎯 Custom Pair', 'perps_custom_pair')
-      ],
-      [
-        Markup.button.callback('📊 Positions', 'positions')
-      ],
-      [
-        Markup.button.callback('💰 Balance', 'balance')
-      ],
-      // Navigation
-      [
-        Markup.button.callback('🏪 Switch to Spot', 'trade_spot'),
-        Markup.button.callback('🔙 Back', 'unified_trade')
-      ]
+    perpsText += `\n\n**Quick Actions:**`;
+
+    const keyboardRows = [];
+
+    // Create long/short buttons for top symbols
+    topFuturesSymbols.slice(0, 3).forEach(symbol => {
+      const emoji = symbolService.getSymbolEmoji(symbol.symbol);
+      const name = symbolService.getCleanSymbolName(symbol.symbol);
+      keyboardRows.push([
+        Markup.button.callback(`📈 Long ${name}`, `perps_buy_${symbol.symbol}`),
+        Markup.button.callback(`📉 Short ${name}`, `perps_sell_${symbol.symbol}`)
+      ]);
+    });
+
+    // Add action buttons
+    keyboardRows.push([
+      Markup.button.callback('🎯 Custom Pair', 'perps_custom_pair')
     ]);
+    keyboardRows.push([
+      Markup.button.callback('📊 Positions', 'positions')
+    ]);
+    keyboardRows.push([
+      Markup.button.callback('💰 Balance', 'balance')
+    ]);
+
+    // Navigation
+    keyboardRows.push([
+      Markup.button.callback('🏪 Switch to Spot', 'trade_spot'),
+      Markup.button.callback('🔙 Back', 'unified_trade')
+    ]);
+
+    const keyboard = Markup.inlineKeyboard(keyboardRows);
 
     try {
       await ctx.editMessageText(perpsText, { parse_mode: 'Markdown', ...keyboard });
