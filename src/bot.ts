@@ -469,6 +469,28 @@ Choose an action below to get started:
       await this.handleCustomPairSelection(ctx, 'perps');
     });
 
+    // Spot trading actions
+    this.bot.action('spot_sell_menu', async (ctx) => {
+      await this.handleSpotSellMenu(ctx);
+    });
+
+    this.bot.action('spot_assets', async (ctx) => {
+      await this.handleSpotAssetsCommand(ctx);
+    });
+
+    // Spot sell individual asset actions
+    this.bot.action(/^spot_sell_([A-Z0-9]+)$/, async (ctx) => {
+      const asset = ctx.match[1];
+      await this.handleSpotSellAsset(ctx, asset);
+    });
+
+    // Spot sell percentage actions
+    this.bot.action(/^spot_sell_([A-Z0-9]+)_(\d+)pct$/, async (ctx) => {
+      const asset = ctx.match[1];
+      const percentage = parseInt(ctx.match[2]);
+      await this.handleSpotSellPercentage(ctx, asset, percentage);
+    });
+
     // Spot execution actions
     this.bot.action(/^spot_execute_(buy|sell)_(.+)_(\d+)u$/, async (ctx) => {
       const action = ctx.match[1];
@@ -823,6 +845,10 @@ Please send your **API Key** now:
       this.futuresAccountServices.set(userId, new FuturesAccountService(apiClient));
     }
     return this.futuresAccountServices.get(userId)!;
+  }
+
+  private isMockMode(): boolean {
+    return process.env.MOCK === 'true';
   }
 
   private async handleCustomPairInput(ctx: BotContext, text: string): Promise<void> {
@@ -3170,6 +3196,333 @@ ${preview.maxSlippageExceeded ? '\n❌ **Max slippage exceeded**' : ''}
     } catch (error) {
       console.error('Failed to start bot:', error);
       process.exit(1);
+    }
+  }
+
+  private async handleSpotAssetsCommand(ctx: BotContext): Promise<void> {
+    if (!ctx.userState?.isLinked) {
+      await ctx.reply('❌ Please link your API credentials first using /link');
+      return;
+    }
+
+    try {
+      const spotService = await this.getSpotAccountService(ctx.userState.userId);
+      const portfolioSummary = await spotService.getPortfolioSummary();
+
+      if (portfolioSummary.mainAssets.length === 0 && portfolioSummary.smallBalances.length === 0) {
+        await ctx.reply('🏦 **No Assets Found**\n\nYou don\'t have any assets in your spot wallet.\n\nUse /trade to start buying assets!');
+        return;
+      }
+
+      let assetsText = '🏦 **YOUR SPOT ASSETS**\n';
+      assetsText += '═'.repeat(40) + '\n\n';
+      assetsText += `📊 **Total Value:** $${portfolioSummary.totalUsdValue.toFixed(2)}\n`;
+      assetsText += `💵 **USDT Balance:** $${portfolioSummary.usdtBalance.toFixed(2)}\n\n`;
+
+      // Show main assets
+      if (portfolioSummary.mainAssets.length > 0) {
+        assetsText += '**🏆 MAIN HOLDINGS (>$10):**\n';
+        portfolioSummary.mainAssets.forEach(asset => {
+          const percentage = portfolioSummary.totalUsdValue > 0 ? (asset.usdValue! / portfolioSummary.totalUsdValue * 100) : 0;
+          assetsText += `• **${asset.asset}**: ${asset.total.toFixed(6)}\n`;
+          assetsText += `  $${asset.usdValue!.toFixed(2)} • ${percentage.toFixed(1)}%\n`;
+          if (parseFloat(asset.locked) > 0) {
+            assetsText += `  🔒 Locked: ${asset.locked}\n`;
+          }
+        });
+        assetsText += '\n';
+      }
+
+      // Show small balances
+      if (portfolioSummary.smallBalances.length > 0) {
+        assetsText += '**🪙 SMALL HOLDINGS (<$10):**\n';
+        portfolioSummary.smallBalances.slice(0, 5).forEach(asset => {
+          assetsText += `• ${asset.asset}: ${asset.total.toFixed(6)} ($${asset.usdValue!.toFixed(2)})\n`;
+        });
+        if (portfolioSummary.smallBalances.length > 5) {
+          assetsText += `• ... and ${portfolioSummary.smallBalances.length - 5} more\n`;
+        }
+      }
+
+      // Create sell buttons for assets with significant value
+      const sellableAssets = [...portfolioSummary.mainAssets, ...portfolioSummary.smallBalances]
+        .filter(asset => asset.asset !== 'USDT' && asset.total > 0.001);
+
+      const keyboardRows = [];
+      
+      if (sellableAssets.length > 0) {
+        // Add sell buttons for top assets
+        for (let i = 0; i < Math.min(sellableAssets.length, 6); i += 2) {
+          const row = [];
+          const asset1 = sellableAssets[i];
+          if (asset1) {
+            row.push(Markup.button.callback(`🔴 Sell ${asset1.asset}`, `spot_sell_${asset1.asset}`));
+          }
+          
+          const asset2 = sellableAssets[i + 1];
+          if (asset2) {
+            row.push(Markup.button.callback(`🔴 Sell ${asset2.asset}`, `spot_sell_${asset2.asset}`));
+          }
+          
+          keyboardRows.push(row);
+        }
+      }
+
+      // Action buttons
+      keyboardRows.push([
+        Markup.button.callback('🔄 Refresh', 'spot_assets'),
+        Markup.button.callback('🏪 Buy More', 'trade_spot')
+      ]);
+      keyboardRows.push([
+        Markup.button.callback('💰 Balance', 'balance'),
+        Markup.button.callback('🔙 Back', 'trade_spot')
+      ]);
+
+      const keyboard = Markup.inlineKeyboard(keyboardRows);
+      await ctx.reply(assetsText, { parse_mode: 'Markdown', ...keyboard });
+
+    } catch (error) {
+      console.error('Spot assets command error:', error);
+      await ctx.reply('❌ Failed to fetch your assets. Please try again.');
+    }
+  }
+
+  private async handleSpotSellMenu(ctx: BotContext): Promise<void> {
+    if (!ctx.userState?.isLinked) {
+      await ctx.reply('❌ Please link your API credentials first using /link');
+      return;
+    }
+
+    try {
+      const spotService = await this.getSpotAccountService(ctx.userState.userId);
+      const portfolioSummary = await spotService.getPortfolioSummary();
+
+      // Get sellable assets (exclude USDT)
+      const sellableAssets = [...portfolioSummary.mainAssets, ...portfolioSummary.smallBalances]
+        .filter(asset => asset.asset !== 'USDT' && asset.total > 0.001)
+        .sort((a, b) => (b.usdValue || 0) - (a.usdValue || 0));
+
+      if (sellableAssets.length === 0) {
+        const keyboard = Markup.inlineKeyboard([
+          [
+            Markup.button.callback('🏪 Buy Assets', 'trade_spot'),
+            Markup.button.callback('🔙 Back', 'trade_spot')
+          ]
+        ]);
+        await ctx.reply('💱 **No Assets to Sell**\n\nYou don\'t have any sellable assets in your spot wallet.\n\nOnly USDT found - use it to buy other assets!', keyboard);
+        return;
+      }
+
+      let sellText = '💱 **SELL YOUR ASSETS**\n';
+      sellText += '═'.repeat(40) + '\n\n';
+      sellText += 'Select an asset to sell:\n\n';
+
+      // Show sellable assets with values
+      sellableAssets.slice(0, 8).forEach(asset => {
+        sellText += `• **${asset.asset}**: ${asset.total.toFixed(6)} ($${asset.usdValue!.toFixed(2)})\n`;
+      });
+
+      // Create sell buttons
+      const keyboardRows = [];
+      
+      for (let i = 0; i < Math.min(sellableAssets.length, 8); i += 2) {
+        const row = [];
+        const asset1 = sellableAssets[i];
+        if (asset1) {
+          row.push(Markup.button.callback(`${asset1.asset} ($${asset1.usdValue!.toFixed(0)})`, `spot_sell_${asset1.asset}`));
+        }
+        
+        const asset2 = sellableAssets[i + 1];
+        if (asset2) {
+          row.push(Markup.button.callback(`${asset2.asset} ($${asset2.usdValue!.toFixed(0)})`, `spot_sell_${asset2.asset}`));
+        }
+        
+        keyboardRows.push(row);
+      }
+
+      // Navigation buttons
+      keyboardRows.push([
+        Markup.button.callback('🏦 View All Assets', 'spot_assets'),
+        Markup.button.callback('🔙 Back', 'trade_spot')
+      ]);
+
+      const keyboard = Markup.inlineKeyboard(keyboardRows);
+      await ctx.reply(sellText, { parse_mode: 'Markdown', ...keyboard });
+
+    } catch (error) {
+      console.error('Spot sell menu error:', error);
+      await ctx.reply('❌ Failed to load sell menu. Please try again.');
+    }
+  }
+
+  private async handleSpotSellAsset(ctx: BotContext, asset: string): Promise<void> {
+    if (!ctx.userState?.isLinked) {
+      await ctx.reply('❌ Please link your API credentials first using /link');
+      return;
+    }
+
+    try {
+      const spotService = await this.getSpotAccountService(ctx.userState.userId);
+      const assetBalance = await spotService.getAssetBalance(asset);
+
+      if (!assetBalance || assetBalance.total <= 0.001) {
+        await ctx.reply(`❌ You don't have enough ${asset} to sell. Minimum: 0.001`);
+        return;
+      }
+
+      const symbol = `${asset}USDT`;
+      const currentPrice = await this.getCurrentPrice(symbol);
+      const totalValue = assetBalance.total * currentPrice;
+
+      let sellText = `💱 **SELL ${asset}**\n`;
+      sellText += '═'.repeat(30) + '\n\n';
+      sellText += `🏦 **Available:** ${assetBalance.total.toFixed(6)} ${asset}\n`;
+      sellText += `💰 **Current Price:** $${currentPrice.toFixed(6)}\n`;
+      sellText += `📊 **Total Value:** $${totalValue.toFixed(2)}\n\n`;
+
+      if (parseFloat(assetBalance.locked) > 0) {
+        sellText += `🔒 **Locked:** ${assetBalance.locked} ${asset}\n`;
+        sellText += `✅ **Available to Sell:** ${assetBalance.free} ${asset}\n\n`;
+      }
+
+      sellText += '**Quick Sell Options:**\n';
+
+      // Create sell percentage buttons
+      const keyboardRows = [];
+      
+      // Percentage sells
+      keyboardRows.push([
+        Markup.button.callback('25% Sell', `spot_sell_${asset}_25pct`),
+        Markup.button.callback('50% Sell', `spot_sell_${asset}_50pct`)
+      ]);
+      keyboardRows.push([
+        Markup.button.callback('75% Sell', `spot_sell_${asset}_75pct`),
+        Markup.button.callback('100% Sell All', `spot_sell_${asset}_100pct`)
+      ]);
+
+      // Custom amount
+      keyboardRows.push([
+        Markup.button.callback('💰 Custom Amount', `spot_custom_sell_${asset}`)
+      ]);
+
+      // Navigation
+      keyboardRows.push([
+        Markup.button.callback('🔙 Back to Sell Menu', 'spot_sell_menu'),
+        Markup.button.callback('🏦 View Assets', 'spot_assets')
+      ]);
+
+      const keyboard = Markup.inlineKeyboard(keyboardRows);
+      await ctx.reply(sellText, { parse_mode: 'Markdown', ...keyboard });
+
+    } catch (error) {
+      console.error(`Spot sell ${asset} error:`, error);
+      await ctx.reply(`❌ Failed to load ${asset} sell options. Please try again.`);
+    }
+  }
+
+  private async handleSpotSellPercentage(ctx: BotContext, asset: string, percentage: number): Promise<void> {
+    if (!ctx.userState?.isLinked) {
+      await ctx.reply('❌ Please link your API credentials first using /link');
+      return;
+    }
+
+    try {
+      const spotService = await this.getSpotAccountService(ctx.userState.userId);
+      const assetBalance = await spotService.getAssetBalance(asset);
+
+      if (!assetBalance || assetBalance.total <= 0.001) {
+        await ctx.reply(`❌ You don't have enough ${asset} to sell. Minimum: 0.001`);
+        return;
+      }
+
+      const sellAmount = (assetBalance.total * percentage) / 100;
+      const symbol = `${asset}USDT`;
+
+      if (sellAmount < 0.001) {
+        await ctx.reply(`❌ Sell amount too small: ${sellAmount.toFixed(6)} ${asset}. Minimum: 0.001`);
+        return;
+      }
+
+      // Execute the spot sell order
+      const apiClient = await this.getOrCreateApiClient(ctx.userState.userId);
+      
+      // Format quantity with proper precision
+      const formattedQuantity = await this.formatQuantityWithPrecision(apiClient, symbol, sellAmount);
+      
+      const orderRequest: NewOrderRequest = {
+        symbol,
+        side: 'SELL',
+        type: 'MARKET',
+        quantity: formattedQuantity,
+        newClientOrderId: `spot_sell_${asset}_${percentage}pct_${Date.now()}`,
+        timestamp: Date.now(),
+        signature: '' // Will be set by signing
+      };
+
+      console.log(`[SPOT SELL] ${percentage}% of ${asset}: ${formattedQuantity} ${asset}`);
+
+      if (this.isMockMode()) {
+        await ctx.reply(`🟢 **Mock Spot Sell Executed**\n\n${percentage}% of ${asset} (${formattedQuantity}) would be sold at market price.\n\n⚠️ This is a simulation - no real trade was placed.`);
+        return;
+      }
+
+      const result = await apiClient.placeSpotOrder(orderRequest);
+      
+      const currentPrice = await this.getCurrentPrice(symbol);
+      const estimatedValue = parseFloat(formattedQuantity) * currentPrice;
+
+      const successText = [
+        `✅ **Spot Sell Order Placed**`,
+        '',
+        `💱 **Sold:** ${formattedQuantity} ${asset} (${percentage}%)`,
+        `💰 **Estimated Value:** $${estimatedValue.toFixed(2)}`,
+        `📄 **Order ID:** ${result.orderId}`,
+        `🔗 **Status:** ${result.status}`,
+        '',
+        `💡 Market orders execute immediately at best available price.`
+      ].join('\n');
+
+      const keyboard = Markup.inlineKeyboard([
+        [
+          Markup.button.callback('🏦 View Assets', 'spot_assets'),
+          Markup.button.callback('💰 Balance', 'balance')
+        ],
+        [
+          Markup.button.callback('🔄 Sell More', 'spot_sell_menu'),
+          Markup.button.callback('🏪 Buy Assets', 'trade_spot')
+        ]
+      ]);
+
+      await ctx.reply(successText, { parse_mode: 'Markdown', ...keyboard });
+
+      // Log trade for tracking
+      console.log(`[TRADE] Spot sell: ${formattedQuantity} ${asset} for user ${ctx.userState.userId}`);
+
+    } catch (error) {
+      console.error(`Spot sell ${percentage}% ${asset} error:`, error);
+      
+      let errorMessage = `❌ **Spot Sell Failed**\n\nFailed to sell ${percentage}% of ${asset}.\n\n`;
+      
+      if (error instanceof Error) {
+        if (error.message.includes('Precision')) {
+          errorMessage += `⚠️ **Issue:** Precision error - order amount may be too small or invalid format.`;
+        } else if (error.message.includes('insufficient')) {
+          errorMessage += `⚠️ **Issue:** Insufficient balance to complete this order.`;
+        } else {
+          errorMessage += `**Error:** ${error.message}`;
+        }
+      } else {
+        errorMessage += 'Please try again or contact support.';
+      }
+
+      const keyboard = Markup.inlineKeyboard([
+        [
+          Markup.button.callback('🔄 Try Again', `spot_sell_${asset}`),
+          Markup.button.callback('🏦 View Assets', 'spot_assets')
+        ]
+      ]);
+
+      await ctx.reply(errorMessage, { parse_mode: 'Markdown', ...keyboard });
     }
   }
 

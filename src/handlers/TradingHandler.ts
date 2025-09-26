@@ -192,6 +192,7 @@ export class TradingHandler extends BaseHandler {
       Markup.button.callback('💱 Sell Assets', 'spot_sell_menu')
     ]);
     keyboardRows.push([
+      Markup.button.callback('🏦 My Assets', 'spot_assets'),
       Markup.button.callback('💰 Balance', 'balance')
     ]);
 

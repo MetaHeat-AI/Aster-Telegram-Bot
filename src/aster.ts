@@ -541,6 +541,39 @@ export class AsterApiClient {
     }
   }
 
+  async placeSpotOrder(orderRequest: NewOrderRequest): Promise<OrderResponse> {
+    // Use spot API base URL and endpoint
+    const spotBaseUrl = 'https://sapi.asterdex.com';
+    const signedRequest = AsterSigner.signPostRequest('/api/v1/order', {
+      symbol: orderRequest.symbol,
+      side: orderRequest.side,
+      type: orderRequest.type,
+      quantity: orderRequest.quantity,
+      newClientOrderId: orderRequest.newClientOrderId,
+      timestamp: orderRequest.timestamp
+    }, this.apiSecret);
+    
+    // Create axios instance for spot API
+    const spotAxios = axios.create({ 
+      baseURL: spotBaseUrl,
+      headers: {
+        'X-MBX-APIKEY': this.apiKey,
+        'Content-Type': 'application/x-www-form-urlencoded'
+      }
+    });
+    
+    console.log(`[SPOT API] Order request: ${signedRequest.queryString}`);
+    
+    // For POST requests, send the signed parameters as form data
+    const response = await spotAxios.post<OrderResponse>('/api/v1/order', signedRequest.queryString, {
+      headers: {
+        'Content-Type': 'application/x-www-form-urlencoded'
+      }
+    });
+    
+    return response.data;
+  }
+
   async testConnectivity(): Promise<boolean> {
     try {
       const response = await this.axios.get('/fapi/v1/ping');
