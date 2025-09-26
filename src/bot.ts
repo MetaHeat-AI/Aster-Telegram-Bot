@@ -3329,47 +3329,85 @@ ${preview.maxSlippageExceeded ? '\n❌ **Max slippage exceeded**' : ''}
     }
 
     try {
+      await ctx.reply('🔄 Loading your spot assets...');
+      
       const spotService = await this.getSpotAccountService(ctx.userState.userId);
-      const portfolioSummary = await spotService.getPortfolioSummary();
+      const spotBalances = await spotService.getSpotBalances();
 
-      // Get sellable assets (exclude USDT)
-      const sellableAssets = [...portfolioSummary.mainAssets, ...portfolioSummary.smallBalances]
-        .filter(asset => asset.asset !== 'USDT' && asset.total > 0.001)
+      console.log(`[SELL MENU] Found ${spotBalances.length} total balances`);
+      
+      // Get ALL sellable assets (exclude USDT, include very small amounts)
+      const sellableAssets = spotBalances
+        .filter(asset => {
+          const isSellable = asset.asset !== 'USDT' && asset.total > 0.0001; // Lower threshold
+          console.log(`[SELL MENU] ${asset.asset}: ${asset.total} (sellable: ${isSellable})`);
+          return isSellable;
+        })
         .sort((a, b) => (b.usdValue || 0) - (a.usdValue || 0));
 
+      console.log(`[SELL MENU] Found ${sellableAssets.length} sellable assets`);
+
       if (sellableAssets.length === 0) {
+        // Show debug info about what we found
+        const allAssets = spotBalances.map(a => `${a.asset}: ${a.total}`).join(', ');
+        
         const keyboard = Markup.inlineKeyboard([
           [
             Markup.button.callback('🏪 Buy Assets', 'trade_spot'),
             Markup.button.callback('🔙 Back', 'trade_spot')
           ]
         ]);
-        await ctx.reply('💱 **No Assets to Sell**\n\nYou don\'t have any sellable assets in your spot wallet.\n\nOnly USDT found - use it to buy other assets!', keyboard);
+        
+        let noAssetsText = '💱 **No Assets to Sell**\n\n';
+        if (spotBalances.length === 0) {
+          noAssetsText += 'Your spot wallet appears to be empty.\n\n';
+        } else {
+          noAssetsText += `Found ${spotBalances.length} assets in wallet:\n${allAssets.substring(0, 200)}...\n\n`;
+          noAssetsText += 'No assets have sufficient balance (>0.0001) to sell.\n\n';
+        }
+        noAssetsText += 'Use USDT to buy other assets first!';
+        
+        await ctx.editMessageText(noAssetsText, { parse_mode: 'Markdown', ...keyboard });
         return;
       }
 
       let sellText = '💱 **SELL YOUR ASSETS**\n';
       sellText += '═'.repeat(40) + '\n\n';
-      sellText += 'Select an asset to sell:\n\n';
+      sellText += `Select an asset to sell (${sellableAssets.length} available):\n\n`;
 
       // Show sellable assets with values
-      sellableAssets.slice(0, 8).forEach(asset => {
-        sellText += `• **${asset.asset}**: ${asset.total.toFixed(6)} ($${asset.usdValue!.toFixed(2)})\n`;
+      sellableAssets.slice(0, 12).forEach(asset => {
+        const usdValue = asset.usdValue || 0;
+        sellText += `• **${asset.asset}**: ${asset.total.toFixed(6)}`;
+        if (usdValue > 0) {
+          sellText += ` ($${usdValue.toFixed(2)})`;
+        }
+        sellText += '\n';
       });
 
-      // Create sell buttons
+      if (sellableAssets.length > 12) {
+        sellText += `\n... and ${sellableAssets.length - 12} more assets`;
+      }
+
+      // Create sell buttons (show more assets)
       const keyboardRows = [];
       
-      for (let i = 0; i < Math.min(sellableAssets.length, 8); i += 2) {
+      for (let i = 0; i < Math.min(sellableAssets.length, 16); i += 2) {
         const row = [];
         const asset1 = sellableAssets[i];
         if (asset1) {
-          row.push(Markup.button.callback(`${asset1.asset} ($${asset1.usdValue!.toFixed(0)})`, `spot_sell_${asset1.asset}`));
+          const label1 = asset1.usdValue && asset1.usdValue > 0.01 
+            ? `${asset1.asset} ($${asset1.usdValue.toFixed(0)})`
+            : asset1.asset;
+          row.push(Markup.button.callback(label1, `spot_sell_${asset1.asset}`));
         }
         
         const asset2 = sellableAssets[i + 1];
         if (asset2) {
-          row.push(Markup.button.callback(`${asset2.asset} ($${asset2.usdValue!.toFixed(0)})`, `spot_sell_${asset2.asset}`));
+          const label2 = asset2.usdValue && asset2.usdValue > 0.01 
+            ? `${asset2.asset} ($${asset2.usdValue.toFixed(0)})`
+            : asset2.asset;
+          row.push(Markup.button.callback(label2, `spot_sell_${asset2.asset}`));
         }
         
         keyboardRows.push(row);
@@ -3382,11 +3420,11 @@ ${preview.maxSlippageExceeded ? '\n❌ **Max slippage exceeded**' : ''}
       ]);
 
       const keyboard = Markup.inlineKeyboard(keyboardRows);
-      await ctx.reply(sellText, { parse_mode: 'Markdown', ...keyboard });
+      await ctx.editMessageText(sellText, { parse_mode: 'Markdown', ...keyboard });
 
     } catch (error) {
       console.error('Spot sell menu error:', error);
-      await ctx.reply('❌ Failed to load sell menu. Please try again.');
+      await ctx.reply(`❌ Failed to load sell menu: ${error instanceof Error ? error.message : 'Unknown error'}`);
     }
   }
 
