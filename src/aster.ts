@@ -414,6 +414,8 @@ export class AsterApiClient {
   }): Promise<any> {
     // Use spot API base URL and endpoint
     const spotBaseUrl = 'https://sapi.asterdex.com';
+    
+    // Create proper request with signed parameters
     const signedRequest = AsterSigner.signPostRequest('/api/v1/order', orderParams, this.apiSecret);
     
     // Create axios instance for spot API
@@ -421,11 +423,15 @@ export class AsterApiClient {
       baseURL: spotBaseUrl,
       headers: {
         'X-MBX-APIKEY': this.apiKey,
-        'Content-Type': 'application/json'
+        'Content-Type': 'application/x-www-form-urlencoded'
       }
     });
     
-    const response = await spotAxios.post(signedRequest.url);
+    console.log(`[SPOT API] Request URL: ${signedRequest.url}`);
+    console.log(`[SPOT API] Request data: ${signedRequest.queryString}`);
+    
+    // For POST requests, send the signed data as form body
+    const response = await spotAxios.post('/api/v1/order', signedRequest.queryString);
     return response.data;
   }
 
@@ -443,7 +449,10 @@ export class AsterApiClient {
       }
     });
     
-    const response = await spotAxios.get<{ balances: Array<{ asset: string; free: string; locked: string }> }>(signedRequest.url);
+    console.log(`[SPOT API] Account request URL: ${signedRequest.url}`);
+    
+    // For GET requests, the signed parameters are in the URL
+    const response = await spotAxios.get<{ balances: Array<{ asset: string; free: string; locked: string }> }>(`/api/v1/account?${signedRequest.url.split('?')[1]}`);
     return response.data;
   }
 
