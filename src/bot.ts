@@ -188,18 +188,20 @@ Get started by linking your Aster API credentials:
       const helpText = `
 🤖 **Aster DEX Trading Bot - Complete Guide**
 
-**🚀 Quick Trading:**
+**🚀 Main Trading Interface:**
+• \`/trade\` - **Unified trading hub** (choose spot or perps)
 • \`/pnl\` - Comprehensive P&L analysis (spot + futures)
 • \`/positions\` - View positions with quick trade buttons
-• Click ⚡ **Quick Trade** for instant buy/sell actions
 
-**📈 Futures Trading:**
-• \`/buy BTCUSDT 100u x5 sl1% tp3%\` - Buy with quote amount
-• \`/sell ETHUSDT 0.25 x3 reduce\` - Sell with base amount  
+**📈 Trading Flows:**
+**Via /trade button interface:**
+• 🏪 **Spot Trading** - Real asset ownership, no leverage
+• ⚡ **Perps Trading** - Leveraged futures, long/short positions
 
-**🏪 Spot Trading:**
+**📝 Direct Commands (Alternative):**
+• \`/buy BTCUSDT 100u x5 sl1% tp3%\` - Futures buy with leverage
+• \`/sell ETHUSDT 0.25 x3 reduce\` - Futures sell/close
 • \`/spot buy BTCUSDT 100u\` - Spot market buy
-• \`/spot sell BTCUSDT 0.25\` - Spot market sell
 • \`/spot limit buy BTCUSDT 0.1 67000\` - Spot limit order
 
 **💰 Account Management:**
@@ -207,13 +209,19 @@ Get started by linking your Aster API credentials:
 • \`/pnl\` - Real-time P&L with weighted averages
 
 **⚙️ Settings & Setup:**
-• \`/settings\` - Configure trading preferences
+• \`/settings\` - Configure trading preferences  
 • \`/link\` - Link API credentials securely
 • \`/unlink\` - Remove API credentials
 
 **📊 Market Data:**
 • \`/price SYMBOL\` - Current price & 24h change
 • \`/funding SYMBOL\` - Funding rates (futures)
+
+**💡 Getting Started:**
+1. Use \`/link\` to connect your Aster DEX API keys
+2. Use \`/trade\` to access the main trading interface
+3. Choose between Spot or Perps trading modes
+4. Start trading with guided button interfaces!
 
 **Examples:**
 ${TradeParser.generateExamples().map(ex => `• \`${ex}\``).join('\n')}
@@ -322,9 +330,9 @@ ${TradeParser.generateExamples().map(ex => `• \`${ex}\``).join('\n')}
       await this.handlePriceCommand(ctx, symbol);
     });
 
-    // Trade command - main trading interface
+    // Trade command - unified trading interface with spot/perps selection
     this.bot.command('trade', async (ctx) => {
-      await this.handleTradeInterface(ctx);
+      await this.handleUnifiedTradeCommand(ctx);
     });
 
     // Admin panic command
@@ -468,6 +476,34 @@ ${TradeParser.generateExamples().map(ex => `• \`${ex}\``).join('\n')}
 
     this.bot.action('pnl_analysis', async (ctx) => {
       await this.handlePnLCommand(ctx);
+    });
+
+    // Trade flow selection actions
+    this.bot.action('trade_spot', async (ctx) => {
+      await this.handleSpotTradingInterface(ctx);
+    });
+
+    this.bot.action('trade_perps', async (ctx) => {
+      await this.handlePerpsTradingInterface(ctx);
+    });
+
+    // Spot trading actions
+    this.bot.action(/^spot_(buy|sell)_(.+)$/, async (ctx) => {
+      const action = ctx.match[1];
+      const symbol = ctx.match[2];
+      await this.handleSpotTradeAction(ctx, action, symbol);
+    });
+
+    // Perps trading actions  
+    this.bot.action(/^perps_(buy|sell)_(.+)$/, async (ctx) => {
+      const action = ctx.match[1];
+      const symbol = ctx.match[2];
+      await this.handlePerpsTradeAction(ctx, action, symbol);
+    });
+
+    // Back to unified trade menu
+    this.bot.action('unified_trade', async (ctx) => {
+      await this.handleUnifiedTradeCommand(ctx);
     });
   }
 
@@ -1032,7 +1068,7 @@ ${trade.maxSlippageExceeded ? '\n❌ **Max slippage exceeded**' : ''}
         ],
         [
           Markup.button.callback('💰 Balance', 'balance'),
-          Markup.button.callback('📈 Trade', 'trade_interface')
+          Markup.button.callback('📈 Trade', 'unified_trade')
         ]
       ]);
 
@@ -1387,7 +1423,7 @@ ${trade.maxSlippageExceeded ? '\n❌ **Max slippage exceeded**' : ''}
         ],
         [
           Markup.button.callback('📊 Manage Position', `position_manage_${symbol}`),
-          Markup.button.callback('📈 Advanced Trade', `trade_interface`)
+          Markup.button.callback('📈 Advanced Trade', `unified_trade`)
         ],
         [
           Markup.button.callback('🔙 Back to Positions', 'positions')
@@ -1615,6 +1651,227 @@ ${trade.maxSlippageExceeded ? '\n❌ **Max slippage exceeded**' : ''}
     }
     
     return totalQty > 0 ? (totalValue / totalQty).toFixed(4) : '0.0000';
+  }
+
+  // === UNIFIED TRADE COMMAND ===
+  
+  private async handleUnifiedTradeCommand(ctx: BotContext): Promise<void> {
+    if (!ctx.userState?.isLinked) {
+      await ctx.reply('❌ Please link your API credentials first using /link');
+      return;
+    }
+
+    const tradeText = [
+      '📈 **Choose Trading Mode**',
+      '',
+      '**🏪 Spot Trading:**',
+      '• Trade real assets (BTC, ETH, etc.)',
+      '• No leverage, direct ownership',
+      '• Perfect for long-term holding',
+      '',
+      '**⚡ Perps Trading:**',
+      '• Leveraged perpetual futures',
+      '• Up to 125x leverage available',
+      '• Long and short positions',
+      '',
+      'Select your preferred trading mode:'
+    ].join('\n');
+
+    const keyboard = Markup.inlineKeyboard([
+      [
+        Markup.button.callback('🏪 Spot Trading', 'trade_spot'),
+        Markup.button.callback('⚡ Perps Trading', 'trade_perps')
+      ],
+      [
+        Markup.button.callback('📊 View Positions', 'positions'),
+        Markup.button.callback('💰 Check Balance', 'balance')
+      ],
+      [
+        Markup.button.callback('📈 P&L Analysis', 'pnl_analysis')
+      ]
+    ]);
+
+    await ctx.reply(tradeText, { parse_mode: 'Markdown', ...keyboard });
+  }
+
+  private async handleSpotTradingInterface(ctx: BotContext): Promise<void> {
+    if (!ctx.userState?.isLinked) {
+      await ctx.reply('❌ Please link your API credentials first using /link');
+      return;
+    }
+
+    const apiClient = this.getUserApiClient(ctx);
+    if (!apiClient) {
+      await ctx.reply('❌ API session not found. Please try linking your credentials again.');
+      return;
+    }
+
+    try {
+      // Get spot account info
+      const accountInfo = await apiClient.getSpotAccount();
+      const usdtBalance = accountInfo.balances.find((b: any) => b.asset === 'USDT');
+      const availableUsdt = usdtBalance ? parseFloat(usdtBalance.free) : 0;
+
+      const spotText = [
+        '🏪 **Spot Trading Interface**',
+        '',
+        `💰 **Available USDT:** $${availableUsdt.toFixed(2)}`,
+        '',
+        '**Popular Pairs:**',
+        '• BTCUSDT - Bitcoin',
+        '• ETHUSDT - Ethereum', 
+        '• SOLUSDT - Solana',
+        '',
+        '**Quick Actions:**'
+      ].join('\n');
+
+      const keyboard = Markup.inlineKeyboard([
+        [
+          Markup.button.callback('₿ Buy BTC', 'spot_buy_BTCUSDT'),
+          Markup.button.callback('⟠ Buy ETH', 'spot_buy_ETHUSDT')
+        ],
+        [
+          Markup.button.callback('◎ Buy SOL', 'spot_buy_SOLUSDT'),
+          Markup.button.callback('🪙 Buy ASTER', 'spot_buy_ASTERUSDT')
+        ],
+        [
+          Markup.button.callback('💱 Sell Assets', 'spot_sell_menu'),
+          Markup.button.callback('📋 Spot Orders', 'spot_orders')
+        ],
+        [
+          Markup.button.callback('🔙 Back to Trade Menu', 'unified_trade'),
+          Markup.button.callback('💰 Balance', 'balance')
+        ]
+      ]);
+
+      await ctx.editMessageText(spotText, { parse_mode: 'Markdown', ...keyboard });
+
+    } catch (error) {
+      console.error('Spot trading interface error:', error);
+      await ctx.reply('❌ Failed to load spot trading interface. Please try again.');
+    }
+  }
+
+  private async handlePerpsTradingInterface(ctx: BotContext): Promise<void> {
+    if (!ctx.userState?.isLinked) {
+      await ctx.reply('❌ Please link your API credentials first using /link');
+      return;
+    }
+
+    const apiClient = this.getUserApiClient(ctx);
+    if (!apiClient) {
+      await ctx.reply('❌ API session not found. Please try linking your credentials again.');
+      return;
+    }
+
+    try {
+      // Get futures account info
+      const accountInfo = await apiClient.getAccountInfo();
+      const availableBalance = parseFloat(accountInfo.availableBalance || '0');
+      const totalWallet = parseFloat(accountInfo.totalWalletBalance || '0');
+
+      const perpsText = [
+        '⚡ **Perps Trading Interface**',
+        '',
+        `💰 **Available Balance:** $${availableBalance.toFixed(2)}`,
+        `📊 **Total Wallet:** $${totalWallet.toFixed(2)}`,
+        '',
+        '**Popular Perps:**',
+        '• BTCUSDT - Bitcoin Perpetual',
+        '• ETHUSDT - Ethereum Perpetual',
+        '• SOLUSDT - Solana Perpetual',
+        '',
+        '**Quick Actions:**'
+      ].join('\n');
+
+      const keyboard = Markup.inlineKeyboard([
+        [
+          Markup.button.callback('📈 Long BTC', 'perps_buy_BTCUSDT'),
+          Markup.button.callback('📉 Short BTC', 'perps_sell_BTCUSDT')
+        ],
+        [
+          Markup.button.callback('📈 Long ETH', 'perps_buy_ETHUSDT'),
+          Markup.button.callback('📉 Short ETH', 'perps_sell_ETHUSDT')
+        ],
+        [
+          Markup.button.callback('📈 Long SOL', 'perps_buy_SOLUSDT'),
+          Markup.button.callback('📉 Short SOL', 'perps_sell_SOLUSDT')
+        ],
+        [
+          Markup.button.callback('📊 Open Positions', 'positions'),
+          Markup.button.callback('⚙️ Leverage Settings', 'leverage_settings')
+        ],
+        [
+          Markup.button.callback('🔙 Back to Trade Menu', 'unified_trade'),
+          Markup.button.callback('💰 Balance', 'balance')
+        ]
+      ]);
+
+      await ctx.editMessageText(perpsText, { parse_mode: 'Markdown', ...keyboard });
+
+    } catch (error) {
+      console.error('Perps trading interface error:', error);
+      await ctx.reply('❌ Failed to load perps trading interface. Please try again.');
+    }
+  }
+
+  private async handleSpotTradeAction(ctx: BotContext, action: string, symbol: string): Promise<void> {
+    if (!ctx.userState?.isLinked) {
+      await ctx.reply('❌ Please link your API credentials first using /link');
+      return;
+    }
+
+    // For now, show the spot trading form - can be enhanced later
+    const actionText = action === 'buy' ? 'Buy' : 'Sell';
+    const emoji = action === 'buy' ? '🟢' : '🔴';
+    
+    const formText = [
+      `${emoji} **Spot ${actionText}: ${symbol}**`,
+      '',
+      '💡 **Quick Examples:**',
+      `• \`/spot ${action} ${symbol} 100u\` - ${actionText} $100 worth`,
+      `• \`/spot ${action} ${symbol} 0.1\` - ${actionText} 0.1 units`,
+      `• \`/spot limit ${action} ${symbol} 0.1 67000\` - Limit order`,
+      '',
+      `Type your spot ${action} command or use /spot for help.`
+    ].join('\n');
+
+    const keyboard = Markup.inlineKeyboard([
+      [
+        Markup.button.callback('🔙 Back to Spot', 'trade_spot')
+      ]
+    ]);
+
+    await ctx.editMessageText(formText, { parse_mode: 'Markdown', ...keyboard });
+  }
+
+  private async handlePerpsTradeAction(ctx: BotContext, action: string, symbol: string): Promise<void> {
+    if (!ctx.userState?.isLinked) {
+      await ctx.reply('❌ Please link your API credentials first using /link');
+      return;
+    }
+
+    // For now, show the perps trading form - can be enhanced later
+    const actionText = action === 'buy' ? 'Long' : 'Short';
+    const emoji = action === 'buy' ? '📈' : '📉';
+    
+    const formText = [
+      `${emoji} **${actionText} Position: ${symbol}**`,
+      '',
+      '💡 **Quick Examples:**',
+      `• \`/${action} ${symbol} 100u x5\` - ${actionText} with 5x leverage`,
+      `• \`/${action} ${symbol} 100u x10 sl2% tp5%\` - With stop-loss & take-profit`,
+      '',
+      `Type your ${action} command or check /help for syntax.`
+    ].join('\n');
+
+    const keyboard = Markup.inlineKeyboard([
+      [
+        Markup.button.callback('🔙 Back to Perps', 'trade_perps')
+      ]
+    ]);
+
+    await ctx.editMessageText(formText, { parse_mode: 'Markdown', ...keyboard });
   }
 
   // === BUTTON-BASED TRADING INTERFACE ===
