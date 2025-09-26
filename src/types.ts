@@ -396,10 +396,13 @@ export interface UserState {
     isBlocked: boolean;
   };
   conversationState?: {
-    step: 'waiting_api_key' | 'waiting_api_secret' | 'waiting_pin' | 'confirming_unlink' | 'price' | 'amount';
+    step: 'waiting_api_key' | 'waiting_api_secret' | 'waiting_pin' | 'confirming_unlink' | 'price' | 'amount' | 'waiting_custom_pair' | 'waiting_custom_amount';
     data?: {
       apiKey?: string;
       pendingAction?: 'link' | 'unlink';
+      tradingType?: 'spot' | 'perps';
+      action?: string;
+      symbol?: string;
     };
     type?: 'expecting_stop_loss' | 'expecting_take_profit' | 'expecting_margin';
     symbol?: string;

@@ -161,83 +161,30 @@ class AsterTradingBot {
       const welcomeText = `
 🚀 **Welcome to Aster Trading Bot!**
 
-This bot allows you to trade Aster DEX Perpetuals directly from Telegram with advanced features like:
+Professional DEX trading with advanced features:
+• 📈 Spot & Perpetual Futures Trading
+• 🎯 Take Profit & Stop Loss Management  
+• 🛡️ Price Protection & Slippage Control
+• 📊 Real-time P&L & Position Monitoring
+• 💰 Custom Amount & Natural Language Input
+• 🔔 Live Trade Notifications
 
-• 📈 Quick buy/sell with leverage
-• 🎯 Take profit & stop loss presets  
-• 🛡️ Price protection & slippage control
-• 📊 Position & balance monitoring
-• 🔔 Real-time trade notifications
+⚠️ **Risk Disclaimer**: Trading involves significant risk. Only trade with funds you can afford to lose.
 
-⚠️ **Risk Disclaimer**: Trading perpetuals involves significant risk. Only trade with funds you can afford to lose.
-
-Get started by linking your Aster API credentials:
+Choose an action below to get started:
       `;
 
-      const keyboard = Markup.inlineKeyboard([
-        [Markup.button.callback('🔗 Link API Credentials', 'link_api')],
-        [Markup.button.callback('📖 Help & Tutorial', 'help')],
-        [Markup.button.callback('⚙️ Settings', 'settings')],
-      ]);
+      await ctx.reply(welcomeText, { parse_mode: 'Markdown', ...this.getMainMenuKeyboard() });
+    });
 
-      await ctx.reply(welcomeText, { parse_mode: 'Markdown', ...keyboard });
+    // Menu command  
+    this.bot.command('menu', async (ctx) => {
+      await this.showMainMenu(ctx);
     });
 
     // Help command
     this.bot.command('help', async (ctx) => {
-      const helpText = `
-🤖 **Aster DEX Trading Bot - Complete Guide**
-
-**🚀 Main Trading Interface:**
-• \`/trade\` - **Unified trading hub** (choose spot or perps)
-• \`/pnl\` - Comprehensive P&L analysis (spot + futures)
-• \`/positions\` - View positions with quick trade buttons
-
-**📈 Trading Flows:**
-**Via /trade button interface:**
-• 🏪 **Spot Trading** - Real asset ownership, no leverage
-• ⚡ **Perps Trading** - Leveraged futures, long/short positions
-
-**📝 Direct Commands (Alternative):**
-• \`/buy BTCUSDT 100u x5 sl1% tp3%\` - Futures buy with leverage
-• \`/sell ETHUSDT 0.25 x3 reduce\` - Futures sell/close
-• \`/spot buy BTCUSDT 100u\` - Spot market buy
-• \`/spot limit buy BTCUSDT 0.1 67000\` - Spot limit order
-
-**💰 Account Management:**
-• \`/balance\` - Account balance (futures + spot)
-• \`/pnl\` - Real-time P&L with weighted averages
-
-**⚙️ Settings & Setup:**
-• \`/settings\` - Configure trading preferences  
-• \`/link\` - Link API credentials securely
-• \`/unlink\` - Remove API credentials
-
-**📊 Market Data:**
-• \`/price SYMBOL\` - Current price & 24h change
-• \`/funding SYMBOL\` - Funding rates (futures)
-
-**💡 Getting Started:**
-1. Use \`/link\` to connect your Aster DEX API keys
-2. Use \`/trade\` to access the main trading interface
-3. Choose between Spot or Perps trading modes
-4. Start trading with guided button interfaces!
-
-**Examples:**
-${TradeParser.generateExamples().map(ex => `• \`${ex}\``).join('\n')}
-
-**Size Notation:**
-• \`100u\` = $100 quote value
-• \`0.25\` = 0.25 base tokens
-
-**Leverage & Risk:**
-• \`x5\` = 5x leverage  
-• \`sl1%\` = 1% stop loss
-• \`tp3%\` = 3% take profit
-• \`reduce\` = reduce-only order
-      `;
-
-      await ctx.reply(helpText, { parse_mode: 'Markdown' });
+      await this.handleHelpCommand(ctx);
     });
 
     // Link command
@@ -284,6 +231,7 @@ ${TradeParser.generateExamples().map(ex => `• \`${ex}\``).join('\n')}
           Markup.button.callback('🔐 PIN Code', 'settings_pin'),
         ],
         [Markup.button.callback('🔄 Reset Defaults', 'settings_reset')],
+        [Markup.button.callback('🏠 Main Menu', 'main_menu')],
       ]);
 
       await ctx.reply(formattedSettings, { parse_mode: 'Markdown', ...keyboard });
@@ -505,6 +453,55 @@ ${TradeParser.generateExamples().map(ex => `• \`${ex}\``).join('\n')}
     this.bot.action('unified_trade', async (ctx) => {
       await this.handleUnifiedTradeCommand(ctx);
     });
+
+    // Custom pair selection
+    this.bot.action('spot_custom_pair', async (ctx) => {
+      await this.handleCustomPairSelection(ctx, 'spot');
+    });
+
+    this.bot.action('perps_custom_pair', async (ctx) => {
+      await this.handleCustomPairSelection(ctx, 'perps');
+    });
+
+    // Spot execution actions
+    this.bot.action(/^spot_execute_(buy|sell)_(.+)_(\d+)u$/, async (ctx) => {
+      const action = ctx.match[1];
+      const symbol = ctx.match[2];
+      const amount = ctx.match[3];
+      await this.executeSpotPresetOrder(ctx, action, symbol, amount);
+    });
+
+    // Perps execution actions
+    this.bot.action(/^perps_execute_(buy|sell)_(.+)_(\d+)u_(\d+)x$/, async (ctx) => {
+      const action = ctx.match[1];
+      const symbol = ctx.match[2];
+      const amount = ctx.match[3];
+      const leverage = ctx.match[4];
+      await this.executePerpsPresetOrder(ctx, action, symbol, amount, leverage);
+    });
+
+    // Custom amount actions
+    this.bot.action(/^spot_custom_amount_(buy|sell)_(.+)$/, async (ctx) => {
+      const action = ctx.match[1];
+      const symbol = ctx.match[2];
+      await this.handleCustomAmountInput(ctx, 'spot', action, symbol);
+    });
+
+    this.bot.action(/^perps_custom_amount_(buy|sell)_(.+)$/, async (ctx) => {
+      const action = ctx.match[1];
+      const symbol = ctx.match[2];
+      await this.handleCustomAmountInput(ctx, 'perps', action, symbol);
+    });
+
+    // Main menu action
+    this.bot.action('main_menu', async (ctx) => {
+      await this.showMainMenu(ctx);
+    });
+
+    // Help button action
+    this.bot.action('help', async (ctx) => {
+      await this.handleHelpCommand(ctx);
+    });
   }
 
   private setupServer(): void {
@@ -593,6 +590,12 @@ Please send your **API Key** now:
           break;
         case 'amount':
           await this.handleAmountInput(ctx, text);
+          break;
+        case 'waiting_custom_pair':
+          await this.handleCustomPairInput(ctx, text);
+          break;
+        case 'waiting_custom_amount':
+          await this.handleCustomAmountInputText(ctx, text);
           break;
         default:
           // Clear invalid state
@@ -790,6 +793,390 @@ Please send your **API Key** now:
     }
     const userId = ctx.userState?.userId || ctx.from!.id;
     this.conversationStates.delete(userId);
+  }
+
+  private async handleCustomPairInput(ctx: BotContext, text: string): Promise<void> {
+    if (!ctx.userState?.conversationState?.data) return;
+
+    const symbol = text.toUpperCase().replace(/\s/g, '');
+    const tradingType = ctx.userState.conversationState.data.tradingType as 'spot' | 'perps';
+
+    // Validate symbol format
+    if (!/^[A-Z]+USDT$/.test(symbol)) {
+      await ctx.reply('❌ Invalid symbol format. Please use format like BTCUSDT, ETHUSDT, etc.');
+      return;
+    }
+
+    try {
+      // Check if symbol exists by trying to get current price
+      const currentPrice = await this.getCurrentPrice(symbol);
+      if (currentPrice === 0) {
+        await ctx.reply(`❌ Symbol ${symbol} not found or not available for trading.`);
+        return;
+      }
+
+      // Clear conversation state
+      this.clearConversationState(ctx);
+
+      // Show trading interface for the custom symbol
+      if (tradingType === 'spot') {
+        await this.handleSpotTradingInterface(ctx, symbol);
+      } else {
+        await this.handlePerpsTradingInterface(ctx, symbol);
+      }
+
+    } catch (error) {
+      console.error('Custom pair input error:', error);
+      await ctx.reply(`❌ Error validating symbol ${symbol}. Please try again.`);
+    }
+  }
+
+  private async handleCustomAmountInputText(ctx: BotContext, text: string): Promise<void> {
+    if (!ctx.userState?.conversationState?.data) return;
+
+    const { tradingType, action, symbol } = ctx.userState.conversationState.data as { tradingType: 'spot' | 'perps', action: string, symbol: string };
+
+    try {
+      const parsedAmount = this.parseAmountString(text);
+      if (!parsedAmount.success) {
+        await ctx.reply(`❌ ${parsedAmount.error}\n\nPlease try formats like:\n• "$100" or "100u"\n• "0.1 ETH"\n• "50%" (of balance)${tradingType === 'perps' ? '\n• "200u 10x" (with leverage)' : ''}`);
+        return;
+      }
+
+      // Clear conversation state
+      this.clearConversationState(ctx);
+
+      // Execute the trade based on parsed amount
+      if (tradingType === 'spot') {
+        await this.executeCustomSpotTrade(ctx, action, symbol, parsedAmount.result);
+      } else {
+        await this.executeCustomPerpsTrade(ctx, action, symbol, parsedAmount.result);
+      }
+
+    } catch (error) {
+      console.error('Custom amount input error:', error);
+      await ctx.reply(`❌ Error processing amount. Please try again.`);
+    }
+  }
+
+  private parseAmountString(text: string): { success: boolean; result?: any; error?: string } {
+    const cleanText = text.trim().toLowerCase();
+
+    // Pattern 1: Dollar amount ($100, 100u, 100 usdt)
+    const dollarMatch = cleanText.match(/^\$?(\d+(?:\.\d+)?)\s*(?:u|usdt)?$/);
+    if (dollarMatch) {
+      return {
+        success: true,
+        result: {
+          type: 'usdt',
+          amount: parseFloat(dollarMatch[1])
+        }
+      };
+    }
+
+    // Pattern 2: Percentage (50%, 25%)
+    const percentMatch = cleanText.match(/^(\d+(?:\.\d+)?)\s*%$/);
+    if (percentMatch) {
+      return {
+        success: true,
+        result: {
+          type: 'percentage',
+          amount: parseFloat(percentMatch[1])
+        }
+      };
+    }
+
+    // Pattern 3: Base asset amount (0.1 btc, 1 eth)
+    const assetMatch = cleanText.match(/^(\d+(?:\.\d+)?)\s*([a-z]+)$/);
+    if (assetMatch && assetMatch[2] !== 'usdt' && assetMatch[2] !== 'u') {
+      return {
+        success: true,
+        result: {
+          type: 'asset',
+          amount: parseFloat(assetMatch[1]),
+          asset: assetMatch[2].toUpperCase()
+        }
+      };
+    }
+
+    // Pattern 4: With leverage (200u 10x, $100 5x)
+    const leverageMatch = cleanText.match(/^\$?(\d+(?:\.\d+)?)\s*(?:u|usdt)?\s*(\d+)x$/);
+    if (leverageMatch) {
+      return {
+        success: true,
+        result: {
+          type: 'usdt_leverage',
+          amount: parseFloat(leverageMatch[1]),
+          leverage: parseInt(leverageMatch[2])
+        }
+      };
+    }
+
+    return {
+      success: false,
+      error: 'Unable to parse amount format'
+    };
+  }
+
+  private async executeCustomSpotTrade(ctx: BotContext, action: string, symbol: string, amountData: any): Promise<void> {
+    const apiClient = this.getUserApiClient(ctx);
+    if (!apiClient) {
+      await ctx.reply('❌ API session not found');
+      return;
+    }
+
+    try {
+      const side = action.toUpperCase() as 'BUY' | 'SELL';
+      let orderParams: any = {
+        symbol,
+        side,
+        type: 'MARKET'
+      };
+
+      if (amountData.type === 'usdt') {
+        orderParams.quoteOrderQty = amountData.amount.toString();
+      } else if (amountData.type === 'asset') {
+        orderParams.quantity = amountData.amount.toString();
+      } else if (amountData.type === 'percentage') {
+        // Get balance and calculate percentage
+        const balance = await apiClient.getSpotAccount();
+        const usdtBalance = balance.balances.find((b: any) => b.asset === 'USDT');
+        const availableAmount = parseFloat(usdtBalance?.free || '0');
+        const percentAmount = (availableAmount * amountData.amount) / 100;
+        orderParams.quoteOrderQty = percentAmount.toString();
+      }
+
+      const order = await apiClient.createSpotOrder(orderParams);
+
+      await ctx.reply(
+        `✅ **Custom Spot Order Executed**\n\n` +
+        `📊 **Symbol:** ${symbol}\n` +
+        `📈 **Side:** ${side}\n` +
+        `💰 **Amount:** ${this.formatAmountData(amountData)}\n` +
+        `🔢 **Order ID:** ${order.orderId}\n` +
+        `⏰ **Time:** ${new Date().toLocaleTimeString()}`,
+        { parse_mode: 'Markdown' }
+      );
+
+    } catch (error) {
+      console.error('Custom spot trade error:', error);
+      await ctx.reply(`❌ Failed to execute ${action} order: ${error instanceof Error ? error.message : 'Unknown error'}`);
+    }
+  }
+
+  private async executeCustomPerpsTrade(ctx: BotContext, action: string, symbol: string, amountData: any): Promise<void> {
+    const apiClient = this.getUserApiClient(ctx);
+    if (!apiClient) {
+      await ctx.reply('❌ API session not found');
+      return;
+    }
+
+    try {
+      const side = action.toUpperCase() as 'BUY' | 'SELL';
+      let leverage = amountData.leverage || ctx.userState?.settings.default_leverage || 10;
+      
+      // Set leverage if specified
+      if (amountData.leverage) {
+        await apiClient.changeLeverage(symbol, leverage);
+      }
+
+      let usdtAmount: number;
+      if (amountData.type === 'usdt' || amountData.type === 'usdt_leverage') {
+        usdtAmount = amountData.amount;
+      } else if (amountData.type === 'percentage') {
+        // Get futures balance
+        const account = await apiClient.getAccountInfo();
+        const availableBalance = parseFloat(account.availableBalance);
+        usdtAmount = (availableBalance * amountData.amount) / 100;
+      } else {
+        throw new Error('Unsupported amount type for futures trading');
+      }
+
+      // Calculate quantity
+      const currentPrice = await this.getCurrentPrice(symbol);
+      const quantity = (usdtAmount / currentPrice).toString();
+
+      const order = await apiClient.createOrder({
+        symbol,
+        side,
+        type: 'MARKET',
+        quantity
+      });
+
+      await ctx.reply(
+        `✅ **Custom Futures Order Executed**\n\n` +
+        `📊 **Symbol:** ${symbol}\n` +
+        `📈 **Side:** ${side}\n` +
+        `💰 **Amount:** ${this.formatAmountData(amountData)}\n` +
+        `⚡ **Leverage:** ${leverage}x\n` +
+        `🔢 **Order ID:** ${order.orderId}\n` +
+        `⏰ **Time:** ${new Date().toLocaleTimeString()}`,
+        { parse_mode: 'Markdown' }
+      );
+
+    } catch (error) {
+      console.error('Custom perps trade error:', error);
+      await ctx.reply(`❌ Failed to execute ${action} order: ${error instanceof Error ? error.message : 'Unknown error'}`);
+    }
+  }
+
+  private formatAmountData(amountData: any): string {
+    switch (amountData.type) {
+      case 'usdt':
+      case 'usdt_leverage':
+        return `$${amountData.amount}`;
+      case 'asset':
+        return `${amountData.amount} ${amountData.asset}`;
+      case 'percentage':
+        return `${amountData.amount}% of balance`;
+      default:
+        return `${amountData.amount}`;
+    }
+  }
+
+  private getMainMenuKeyboard() {
+    return Markup.inlineKeyboard([
+      [
+        Markup.button.callback('📈 Trade', 'unified_trade'),
+        Markup.button.callback('💰 Balance', 'balance')
+      ],
+      [
+        Markup.button.callback('📊 Positions', 'positions'),
+        Markup.button.callback('📈 P&L Analysis', 'pnl_analysis')
+      ],
+      [
+        Markup.button.callback('🔗 Link API', 'link_api'),
+        Markup.button.callback('⚙️ Settings', 'settings')
+      ],
+      [
+        Markup.button.callback('📖 Help', 'help'),
+        Markup.button.callback('🔄 Main Menu', 'main_menu')
+      ]
+    ]);
+  }
+
+  private async showMainMenu(ctx: BotContext): Promise<void> {
+    const menuText = `
+🏠 **Main Menu**
+
+Choose from all available functions:
+
+🔗 **Account**: ${ctx.userState?.isLinked ? '✅ API Linked' : '❌ API Not Linked'}
+💰 **Quick Actions**: Trade, View Positions, Check Balance
+📊 **Analysis**: P&L Reports, Market Data
+⚙️ **Settings**: Configure Trading Preferences
+
+Select an option below:
+    `;
+
+    try {
+      await ctx.editMessageText(menuText, { 
+        parse_mode: 'Markdown', 
+        ...this.getMainMenuKeyboard() 
+      });
+    } catch (error) {
+      // Fallback to new message if edit fails
+      await ctx.reply(menuText, { 
+        parse_mode: 'Markdown', 
+        ...this.getMainMenuKeyboard() 
+      });
+    }
+  }
+
+  private async handleHelpCommand(ctx: BotContext): Promise<void> {
+    const helpText = `
+🤖 **Aster DEX Trading Bot - Complete Guide**
+
+**🚀 Main Trading Interface:**
+• \`/trade\` - **Unified trading hub** (choose spot or perps)
+• \`/pnl\` - Comprehensive P&L analysis (spot + futures)
+• \`/positions\` - View positions with quick trade buttons
+
+**📈 Trading Flows:**
+**Via /trade button interface:**
+• 🏪 **Spot Trading** - Real asset ownership, no leverage
+• ⚡ **Perps Trading** - Leveraged futures, long/short positions
+
+**📝 Direct Commands (Alternative):**
+• \`/buy BTCUSDT 100u x5 sl1% tp3%\` - Futures buy with leverage
+• \`/sell ETHUSDT 0.25 x3 reduce\` - Futures sell/close
+• \`/spot buy BTCUSDT 100u\` - Spot market buy
+• \`/spot limit buy BTCUSDT 0.1 67000\` - Spot limit order
+
+**💰 Account Management:**
+• \`/balance\` - Account balance (futures + spot)
+• \`/pnl\` - Real-time P&L with weighted averages
+
+**⚙️ Settings & Setup:**
+• \`/settings\` - Configure trading preferences  
+• \`/link\` - Link API credentials securely
+• \`/unlink\` - Remove API credentials
+
+**📊 Market Data:**
+• \`/price SYMBOL\` - Current price & 24h change
+
+**💡 Getting Started:**
+1. Use \`/link\` to connect your Aster DEX API keys
+2. Use \`/trade\` to access the main trading interface
+3. Choose between Spot or Perps trading modes
+4. Start trading with guided button interfaces!
+
+**Examples:**
+${TradeParser.generateExamples().map(ex => `• \`${ex}\``).join('\n')}
+
+**Size Notation:**
+• \`100u\` = $100 quote value
+• \`0.25\` = 0.25 base tokens
+
+**Leverage & Risk:**
+• \`x5\` = 5x leverage  
+• \`sl1%\` = 1% stop loss
+• \`tp3%\` = 3% take profit
+• \`reduce\` = reduce-only order
+      `;
+
+    try {
+      await ctx.editMessageText(helpText, { 
+        parse_mode: 'Markdown',
+        reply_markup: {
+          inline_keyboard: [
+            [Markup.button.callback('🔙 Back to Main Menu', 'main_menu')]
+          ]
+        }
+      });
+    } catch (error) {
+      await ctx.reply(helpText, { 
+        parse_mode: 'Markdown',
+        reply_markup: {
+          inline_keyboard: [
+            [Markup.button.callback('🔙 Back to Main Menu', 'main_menu')]
+          ]
+        }
+      });
+    }
+  }
+
+  private async setupBotCommands(): Promise<void> {
+    try {
+      const commands = [
+        { command: 'start', description: '🚀 Start bot and show main menu' },
+        { command: 'menu', description: '🏠 Show main menu with all functions' },
+        { command: 'trade', description: '📈 Unified trading interface (spot/perps)' },
+        { command: 'positions', description: '📊 View and manage open positions' },
+        { command: 'balance', description: '💰 Check account balance' },
+        { command: 'pnl', description: '📈 Comprehensive P&L analysis' },
+        { command: 'link', description: '🔗 Link API credentials securely' },
+        { command: 'settings', description: '⚙️ Configure trading preferences' },
+        { command: 'help', description: '📖 Complete trading guide & commands' },
+        { command: 'price', description: '💹 Get current price for symbol' }
+      ];
+
+      await this.bot.telegram.setMyCommands(commands);
+      console.log('[Bot] Commands menu set up successfully');
+      
+    } catch (error) {
+      console.error('[Bot] Failed to setup commands menu:', error);
+    }
   }
 
   private getUserApiClient(ctx: BotContext): AsterApiClient | null {
@@ -1688,13 +2075,16 @@ ${trade.maxSlippageExceeded ? '\n❌ **Max slippage exceeded**' : ''}
       ],
       [
         Markup.button.callback('📈 P&L Analysis', 'pnl_analysis')
+      ],
+      [
+        Markup.button.callback('🏠 Main Menu', 'main_menu')
       ]
     ]);
 
     await ctx.reply(tradeText, { parse_mode: 'Markdown', ...keyboard });
   }
 
-  private async handleSpotTradingInterface(ctx: BotContext): Promise<void> {
+  private async handleSpotTradingInterface(ctx: BotContext, customSymbol?: string): Promise<void> {
     if (!ctx.userState?.isLinked) {
       await ctx.reply('❌ Please link your API credentials first using /link');
       return;
@@ -1735,12 +2125,16 @@ ${trade.maxSlippageExceeded ? '\n❌ **Max slippage exceeded**' : ''}
           Markup.button.callback('🪙 Buy ASTER', 'spot_buy_ASTERUSDT')
         ],
         [
-          Markup.button.callback('💱 Sell Assets', 'spot_sell_menu'),
-          Markup.button.callback('📋 Spot Orders', 'spot_orders')
+          Markup.button.callback('🎯 Custom Pair', 'spot_custom_pair'),
+          Markup.button.callback('💱 Sell Assets', 'spot_sell_menu')
+        ],
+        [
+          Markup.button.callback('📋 Spot Orders', 'spot_orders'),
+          Markup.button.callback('💰 Balance', 'balance')
         ],
         [
           Markup.button.callback('🔙 Back to Trade Menu', 'unified_trade'),
-          Markup.button.callback('💰 Balance', 'balance')
+          Markup.button.callback('🏠 Main Menu', 'main_menu')
         ]
       ]);
 
@@ -1752,7 +2146,7 @@ ${trade.maxSlippageExceeded ? '\n❌ **Max slippage exceeded**' : ''}
     }
   }
 
-  private async handlePerpsTradingInterface(ctx: BotContext): Promise<void> {
+  private async handlePerpsTradingInterface(ctx: BotContext, customSymbol?: string): Promise<void> {
     if (!ctx.userState?.isLinked) {
       await ctx.reply('❌ Please link your API credentials first using /link');
       return;
@@ -1798,12 +2192,16 @@ ${trade.maxSlippageExceeded ? '\n❌ **Max slippage exceeded**' : ''}
           Markup.button.callback('📉 Short SOL', 'perps_sell_SOLUSDT')
         ],
         [
-          Markup.button.callback('📊 Open Positions', 'positions'),
-          Markup.button.callback('⚙️ Leverage Settings', 'leverage_settings')
+          Markup.button.callback('🎯 Custom Pair', 'perps_custom_pair'),
+          Markup.button.callback('📊 Open Positions', 'positions')
+        ],
+        [
+          Markup.button.callback('⚙️ Leverage Settings', 'leverage_settings'),
+          Markup.button.callback('💰 Balance', 'balance')
         ],
         [
           Markup.button.callback('🔙 Back to Trade Menu', 'unified_trade'),
-          Markup.button.callback('💰 Balance', 'balance')
+          Markup.button.callback('🏠 Main Menu', 'main_menu')
         ]
       ]);
 
@@ -1821,22 +2219,35 @@ ${trade.maxSlippageExceeded ? '\n❌ **Max slippage exceeded**' : ''}
       return;
     }
 
-    // For now, show the spot trading form - can be enhanced later
     const actionText = action === 'buy' ? 'Buy' : 'Sell';
     const emoji = action === 'buy' ? '🟢' : '🔴';
     
+    // Get current price for reference
+    const currentPrice = await this.getCurrentPrice(symbol);
+    
     const formText = [
       `${emoji} **Spot ${actionText}: ${symbol}**`,
+      `📈 **Current Price:** $${currentPrice.toFixed(4)}`,
       '',
-      '💡 **Quick Examples:**',
-      `• \`/spot ${action} ${symbol} 100u\` - ${actionText} $100 worth`,
-      `• \`/spot ${action} ${symbol} 0.1\` - ${actionText} 0.1 units`,
-      `• \`/spot limit ${action} ${symbol} 0.1 67000\` - Limit order`,
-      '',
-      `Type your spot ${action} command or use /spot for help.`
+      '💰 **Choose Order Size:**',
+      'Select a preset amount or enter custom:'
     ].join('\n');
 
     const keyboard = Markup.inlineKeyboard([
+      [
+        Markup.button.callback('$25', `spot_execute_${action}_${symbol}_25u`),
+        Markup.button.callback('$50', `spot_execute_${action}_${symbol}_50u`),
+        Markup.button.callback('$100', `spot_execute_${action}_${symbol}_100u`)
+      ],
+      [
+        Markup.button.callback('$250', `spot_execute_${action}_${symbol}_250u`),
+        Markup.button.callback('$500', `spot_execute_${action}_${symbol}_500u`),
+        Markup.button.callback('$1000', `spot_execute_${action}_${symbol}_1000u`)
+      ],
+      [
+        Markup.button.callback('🎯 Custom Amount', `spot_custom_amount_${action}_${symbol}`),
+        Markup.button.callback('📋 Limit Order', `spot_limit_${action}_${symbol}`)
+      ],
       [
         Markup.button.callback('🔙 Back to Spot', 'trade_spot')
       ]
@@ -1851,21 +2262,39 @@ ${trade.maxSlippageExceeded ? '\n❌ **Max slippage exceeded**' : ''}
       return;
     }
 
-    // For now, show the perps trading form - can be enhanced later
     const actionText = action === 'buy' ? 'Long' : 'Short';
     const emoji = action === 'buy' ? '📈' : '📉';
     
+    // Get current price for reference
+    const currentPrice = await this.getCurrentPrice(symbol);
+    
     const formText = [
       `${emoji} **${actionText} Position: ${symbol}**`,
+      `📈 **Current Price:** $${currentPrice.toFixed(4)}`,
       '',
-      '💡 **Quick Examples:**',
-      `• \`/${action} ${symbol} 100u x5\` - ${actionText} with 5x leverage`,
-      `• \`/${action} ${symbol} 100u x10 sl2% tp5%\` - With stop-loss & take-profit`,
-      '',
-      `Type your ${action} command or check /help for syntax.`
+      '💰 **Choose Position Size:**',
+      'Select preset amount and leverage:'
     ].join('\n');
 
     const keyboard = Markup.inlineKeyboard([
+      [
+        Markup.button.callback('$25 × 5x', `perps_execute_${action}_${symbol}_25u_5x`),
+        Markup.button.callback('$50 × 5x', `perps_execute_${action}_${symbol}_50u_5x`),
+        Markup.button.callback('$100 × 5x', `perps_execute_${action}_${symbol}_100u_5x`)
+      ],
+      [
+        Markup.button.callback('$25 × 10x', `perps_execute_${action}_${symbol}_25u_10x`),
+        Markup.button.callback('$50 × 10x', `perps_execute_${action}_${symbol}_50u_10x`),
+        Markup.button.callback('$100 × 10x', `perps_execute_${action}_${symbol}_100u_10x`)
+      ],
+      [
+        Markup.button.callback('$250 × 5x', `perps_execute_${action}_${symbol}_250u_5x`),
+        Markup.button.callback('$500 × 10x', `perps_execute_${action}_${symbol}_500u_10x`)
+      ],
+      [
+        Markup.button.callback('🎯 Custom Size', `perps_custom_amount_${action}_${symbol}`),
+        Markup.button.callback('⚙️ Advanced', `perps_advanced_${action}_${symbol}`)
+      ],
       [
         Markup.button.callback('🔙 Back to Perps', 'trade_perps')
       ]
@@ -2028,6 +2457,179 @@ ${preview.maxSlippageExceeded ? '\n❌ **Max slippage exceeded**' : ''}
     }
   }
 
+  private async handleCustomPairSelection(ctx: BotContext, tradingType: 'spot' | 'perps'): Promise<void> {
+    if (!ctx.userState) return;
+
+    try {
+      await ctx.editMessageText(
+        '🎯 **Custom Trading Pair**\n\n' +
+        '✍️ Please type the trading pair symbol you want to trade:\n\n' +
+        '📝 Examples:\n' +
+        '• BTCUSDT\n' +
+        '• ETHUSDT\n' +
+        '• SOLUSDT\n' +
+        '• ADAUSDT\n\n' +
+        '💡 Just type the symbol and I\'ll show you trading options!',
+        { 
+          parse_mode: 'Markdown',
+          reply_markup: {
+            inline_keyboard: [
+              [Markup.button.callback('🔙 Back', `trade_${tradingType}`)],
+            ]
+          }
+        }
+      );
+
+      // Set conversation state to expect custom pair input
+      const updatedState = { 
+        step: 'waiting_custom_pair' as any,
+        data: { tradingType }
+      };
+      
+      ctx.userState.conversationState = updatedState;
+      this.conversationStates.set(ctx.userState.userId, updatedState);
+
+    } catch (error) {
+      console.error('Custom pair selection error:', error);
+      await ctx.reply('❌ Failed to set up custom pair selection.');
+    }
+  }
+
+  private async handleCustomAmountInput(ctx: BotContext, tradingType: 'spot' | 'perps', action: string, symbol: string): Promise<void> {
+    if (!ctx.userState) return;
+
+    try {
+      const actionText = action.toUpperCase() === 'BUY' ? '🟢 Buy' : '🔴 Sell';
+      
+      await ctx.editMessageText(
+        `💰 **Custom ${actionText} Amount for ${symbol}**\n\n` +
+        '✍️ Please specify your trade amount:\n\n' +
+        '📝 Examples:\n' +
+        '• "$100" (trade with 100 USDT)\n' +
+        '• "0.1 BTC" (trade 0.1 BTC)\n' +
+        '• "50%" (use 50% of balance)\n' +
+        (tradingType === 'perps' ? '• "200u 10x" (200 USDT with 10x leverage)\n' : '') +
+        '\n💡 Just type your desired amount naturally!',
+        { 
+          parse_mode: 'Markdown',
+          reply_markup: {
+            inline_keyboard: [
+              [Markup.button.callback('🔙 Back', `trade_${tradingType}`)],
+            ]
+          }
+        }
+      );
+
+      // Set conversation state to expect custom amount input
+      const updatedState = { 
+        step: 'waiting_custom_amount' as any,
+        data: { tradingType, action, symbol }
+      };
+      
+      ctx.userState.conversationState = updatedState;
+      this.conversationStates.set(ctx.userState.userId, updatedState);
+
+    } catch (error) {
+      console.error('Custom amount input error:', error);
+      await ctx.reply('❌ Failed to set up custom amount input.');
+    }
+  }
+
+  private async executeSpotPresetOrder(ctx: BotContext, action: string, symbol: string, amount: string): Promise<void> {
+    if (!ctx.userState?.isLinked) {
+      await ctx.answerCbQuery('❌ Please link your API credentials first');
+      return;
+    }
+
+    const apiClient = this.getUserApiClient(ctx);
+    if (!apiClient) {
+      await ctx.answerCbQuery('❌ API session not found');
+      return;
+    }
+
+    try {
+      const side = action.toUpperCase() as 'BUY' | 'SELL';
+      const usdtAmount = parseInt(amount);
+      
+      // Get current price for quantity calculation
+      const currentPrice = await this.getCurrentPrice(symbol);
+      const quantity = (usdtAmount / currentPrice).toString();
+
+      const order = await apiClient.createSpotOrder({
+        symbol,
+        side,
+        type: 'MARKET',
+        quoteOrderQty: usdtAmount.toString()
+      });
+
+      await ctx.answerCbQuery('✅ Spot order executed!');
+      await ctx.editMessageText(
+        `✅ **Spot Order Executed**\n\n` +
+        `📊 **Symbol:** ${symbol}\n` +
+        `📈 **Side:** ${side}\n` +
+        `💰 **Amount:** $${usdtAmount}\n` +
+        `🔢 **Order ID:** ${order.orderId}\n` +
+        `⏰ **Time:** ${new Date().toLocaleTimeString()}`,
+        { parse_mode: 'Markdown' }
+      );
+
+    } catch (error) {
+      console.error('Spot preset order error:', error);
+      await ctx.answerCbQuery('❌ Order failed');
+      await ctx.reply(`❌ Failed to execute ${action} order for ${symbol}: ${error instanceof Error ? error.message : 'Unknown error'}`);
+    }
+  }
+
+  private async executePerpsPresetOrder(ctx: BotContext, action: string, symbol: string, amount: string, leverage: string): Promise<void> {
+    if (!ctx.userState?.isLinked) {
+      await ctx.answerCbQuery('❌ Please link your API credentials first');
+      return;
+    }
+
+    const apiClient = this.getUserApiClient(ctx);
+    if (!apiClient) {
+      await ctx.answerCbQuery('❌ API session not found');
+      return;
+    }
+
+    try {
+      const side = action.toUpperCase() as 'BUY' | 'SELL';
+      const usdtAmount = parseInt(amount);
+      const leverageValue = parseInt(leverage);
+      
+      // Set leverage first
+      await apiClient.changeLeverage(symbol, leverageValue);
+      
+      // Get current price for quantity calculation
+      const currentPrice = await this.getCurrentPrice(symbol);
+      const quantity = (usdtAmount / currentPrice).toString();
+
+      const order = await apiClient.createOrder({
+        symbol,
+        side,
+        type: 'MARKET',
+        quantity
+      });
+
+      await ctx.answerCbQuery('✅ Futures order executed!');
+      await ctx.editMessageText(
+        `✅ **Futures Order Executed**\n\n` +
+        `📊 **Symbol:** ${symbol}\n` +
+        `📈 **Side:** ${side}\n` +
+        `💰 **Amount:** $${usdtAmount}\n` +
+        `⚡ **Leverage:** ${leverageValue}x\n` +
+        `🔢 **Order ID:** ${order.orderId}\n` +
+        `⏰ **Time:** ${new Date().toLocaleTimeString()}`,
+        { parse_mode: 'Markdown' }
+      );
+
+    } catch (error) {
+      console.error('Perps preset order error:', error);
+      await ctx.answerCbQuery('❌ Order failed');
+      await ctx.reply(`❌ Failed to execute ${action} order for ${symbol}: ${error instanceof Error ? error.message : 'Unknown error'}`);
+    }
+  }
+
   private async getOrCreateApiClient(userId: number): Promise<AsterApiClient> {
     let client = this.userSessions.get(userId);
     
@@ -2071,6 +2673,9 @@ ${preview.maxSlippageExceeded ? '\n❌ **Max slippage exceeded**' : ''}
 
       // Start notification manager
       await this.notificationManager.start(this.bot);
+
+      // Setup bot commands menu
+      await this.setupBotCommands();
 
       // Start bot
       await this.bot.launch();
