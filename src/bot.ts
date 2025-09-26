@@ -441,15 +441,15 @@ Choose an action below to get started:
       await this.handlePerpsTradingInterface(ctx);
     });
 
-    // Spot trading actions
-    this.bot.action(/^spot_(buy|sell)_(.+)$/, async (ctx) => {
+    // Spot trading actions (exclude menu actions)
+    this.bot.action(/^spot_(buy|sell)_([A-Z0-9]+USDT)$/, async (ctx) => {
       const action = ctx.match[1];
       const symbol = ctx.match[2];
       await this.handleSpotTradeAction(ctx, action, symbol);
     });
 
-    // Perps trading actions  
-    this.bot.action(/^perps_(buy|sell)_(.+)$/, async (ctx) => {
+    // Perps trading actions (exclude menu actions)
+    this.bot.action(/^perps_(buy|sell)_([A-Z0-9]+USDT)$/, async (ctx) => {
       const action = ctx.match[1];
       const symbol = ctx.match[2];
       await this.handlePerpsTradeAction(ctx, action, symbol);
