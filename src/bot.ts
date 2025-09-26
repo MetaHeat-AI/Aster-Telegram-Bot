@@ -2070,8 +2070,10 @@ ${trade.maxSlippageExceeded ? '\n❌ **Max slippage exceeded**' : ''}
       return;
     }
 
-    const apiClient = this.getUserApiClient(ctx);
-    if (!apiClient) {
+    let apiClient: AsterApiClient;
+    try {
+      apiClient = await this.getOrCreateApiClient(ctx.userState.userId);
+    } catch (error) {
       await ctx.reply('❌ API session not found. Please try linking your credentials again.');
       return;
     }
@@ -2082,7 +2084,28 @@ ${trade.maxSlippageExceeded ? '\n❌ **Max slippage exceeded**' : ''}
       if (unit === 'u') {
         // Buy with USDT amount
         const currentPrice = await this.getCurrentPrice(symbol);
-        const quantity = (amount / currentPrice).toString();
+        const rawQuantity = amount / currentPrice;
+        
+        // Get exchange info for precision limits
+        const exchangeInfo = await apiClient.getExchangeInfo();
+        const symbolInfo = exchangeInfo.symbols.find((s: any) => s.symbol === symbol);
+        
+        let quantity: string;
+        if (symbolInfo) {
+          const lotSizeFilter = symbolInfo.filters.find((f: any) => f.filterType === 'LOT_SIZE');
+          if (lotSizeFilter) {
+            const stepSize = parseFloat(lotSizeFilter.stepSize);
+            const adjustedQuantity = Math.floor(rawQuantity / stepSize) * stepSize;
+            const decimalPlaces = lotSizeFilter.stepSize.split('.')[1]?.length || 0;
+            quantity = adjustedQuantity.toFixed(decimalPlaces);
+            
+            console.log(`[QUICK TRADE PRECISION] Raw: ${rawQuantity}, Adjusted: ${quantity}, StepSize: ${stepSize}`);
+          } else {
+            quantity = rawQuantity.toFixed(6);
+          }
+        } else {
+          quantity = rawQuantity.toFixed(6);
+        }
         
         orderParams = {
           symbol,
@@ -2101,13 +2124,34 @@ ${trade.maxSlippageExceeded ? '\n❌ **Max slippage exceeded**' : ''}
         }
 
         const positionSize = Math.abs(parseFloat(position.positionAmt));
-        const sellQuantity = (positionSize * amount / 100);
+        const rawSellQuantity = (positionSize * amount / 100);
+        
+        // Get exchange info for precision limits
+        const exchangeInfo = await apiClient.getExchangeInfo();
+        const symbolInfo = exchangeInfo.symbols.find((s: any) => s.symbol === symbol);
+        
+        let sellQuantity: string;
+        if (symbolInfo) {
+          const lotSizeFilter = symbolInfo.filters.find((f: any) => f.filterType === 'LOT_SIZE');
+          if (lotSizeFilter) {
+            const stepSize = parseFloat(lotSizeFilter.stepSize);
+            const adjustedQuantity = Math.floor(rawSellQuantity / stepSize) * stepSize;
+            const decimalPlaces = lotSizeFilter.stepSize.split('.')[1]?.length || 0;
+            sellQuantity = adjustedQuantity.toFixed(decimalPlaces);
+            
+            console.log(`[QUICK SELL PRECISION] Raw: ${rawSellQuantity}, Adjusted: ${sellQuantity}, StepSize: ${stepSize}`);
+          } else {
+            sellQuantity = rawSellQuantity.toFixed(6);
+          }
+        } else {
+          sellQuantity = rawSellQuantity.toFixed(6);
+        }
         
         orderParams = {
           symbol,
           side: parseFloat(position.positionAmt) > 0 ? 'SELL' : 'BUY',
           type: 'MARKET',
-          quantity: sellQuantity.toString(),
+          quantity: sellQuantity,
           reduceOnly: true
         };
       } else {
