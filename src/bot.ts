@@ -2581,30 +2581,65 @@ ${trade.maxSlippageExceeded ? '\n❌ **Max slippage exceeded**' : ''}
         return;
       }
 
-      console.log(`[DEBUG] Creating spot interface text and keyboard...`);
-      const spotText = [
-        '🏪 **Spot Trading Interface**',
-        '',
-        `💰 **Available USDT:** $${availableUsdt.toFixed(2)}`,
-        '',
-        '**Popular Pairs:**',
-        '• BTCUSDT - Bitcoin',
-        '• ETHUSDT - Ethereum', 
-        '• SOLUSDT - Solana',
-        '',
-        '**Quick Actions:**'
-      ].join('\n');
+      console.log(`[DEBUG] Getting real top spot symbols...`);
+      const symbolService = await this.getSymbolService(ctx.userState.userId);
+      const topSpotSymbols = await symbolService.getTopSymbolsByVolume(4, 'spot');
+      
+      console.log(`[DEBUG] Found ${topSpotSymbols.length} top spot symbols`);
+      
+      let spotText = '🏪 **Spot Trading Interface**\n\n';
+      spotText += `💰 **Available USDT:** $${availableUsdt.toFixed(2)}\n\n`;
+      
+      if (topSpotSymbols.length > 0) {
+        spotText += '**Top Volume Pairs:**\n';
+        topSpotSymbols.slice(0, 3).forEach(symbol => {
+          const emoji = symbolService.getSymbolEmoji(symbol.symbol);
+          const name = symbolService.getCleanSymbolName(symbol.symbol);
+          const price = parseFloat(symbol.lastPrice).toFixed(4);
+          const change = parseFloat(symbol.priceChangePercent).toFixed(2);
+          const changeEmoji = parseFloat(symbol.priceChangePercent) >= 0 ? '🟢' : '🔴';
+          spotText += `• ${emoji} ${symbol.symbol} - $${price} ${changeEmoji}${change}%\n`;
+        });
+      } else {
+        spotText += '**Popular Pairs:**\n• Loading available pairs...\n';
+      }
+      
+      spotText += '\n**Quick Actions:**';
+
+      // Create dynamic buttons from real symbols
+      const keyboardRows = [];
+      
+      if (topSpotSymbols.length >= 4) {
+        // Use real top symbols (2x2 grid)
+        const buttonSymbols = topSpotSymbols.slice(0, 4);
+        for (let i = 0; i < buttonSymbols.length; i += 2) {
+          const row = [];
+          
+          if (buttonSymbols[i]) {
+            const symbol = buttonSymbols[i];
+            const emoji = symbolService.getSymbolEmoji(symbol.symbol);
+            const name = symbolService.getCleanSymbolName(symbol.symbol);
+            row.push(Markup.button.callback(`${emoji} ${name}`, `spot_buy_${symbol.symbol}`));
+          }
+          
+          if (buttonSymbols[i + 1]) {
+            const symbol = buttonSymbols[i + 1];
+            const emoji = symbolService.getSymbolEmoji(symbol.symbol);
+            const name = symbolService.getCleanSymbolName(symbol.symbol);
+            row.push(Markup.button.callback(`${emoji} ${name}`, `spot_buy_${symbol.symbol}`));
+          }
+          
+          keyboardRows.push(row);
+        }
+      } else {
+        // Fallback to generic options if no symbols found
+        keyboardRows.push([
+          Markup.button.callback('🎯 Browse All Pairs', 'spot_custom_pair')
+        ]);
+      }
 
       const keyboard = Markup.inlineKeyboard([
-        // Popular Coins (Clean 2x2 grid)
-        [
-          Markup.button.callback('₿ Bitcoin', 'spot_buy_BTCUSDT'),
-          Markup.button.callback('⟠ Ethereum', 'spot_buy_ETHUSDT')
-        ],
-        [
-          Markup.button.callback('◎ Solana', 'spot_buy_SOLUSDT'),
-          Markup.button.callback('🪙 Aster', 'spot_buy_ASTERUSDT')
-        ],
+        ...keyboardRows,
         // Actions (Separated for clarity)
         [
           Markup.button.callback('🎯 Custom Pair', 'spot_custom_pair')
@@ -2677,48 +2712,71 @@ ${trade.maxSlippageExceeded ? '\n❌ **Max slippage exceeded**' : ''}
         console.log(`[DEBUG] No custom symbol, showing regular perps interface`);
       }
 
-      const perpsText = [
+      // Get real top futures symbols
+      const symbolService = await this.getSymbolService(ctx.userState.userId);
+      const topFuturesSymbols = await symbolService.getTopSymbolsByVolume(3, 'futures');
+      console.log(`[DEBUG] Got ${topFuturesSymbols.length} top futures symbols`);
+
+      let perpsText = [
         '⚡ **Perps Trading Interface**',
         '',
         `💰 **Available Balance:** $${availableBalance.toFixed(2)}`,
         `📊 **Total Wallet:** $${totalWallet.toFixed(2)}`,
-        '',
-        '**Popular Perps:**',
-        '• BTCUSDT - Bitcoin Perpetual',
-        '• ETHUSDT - Ethereum Perpetual',
-        '• SOLUSDT - Solana Perpetual',
-        '',
-        '**Quick Actions:**'
+        ''
       ].join('\n');
 
-      const keyboard = Markup.inlineKeyboard([
-        // Popular Perps (Clean Long/Short pairs)
-        [
-          Markup.button.callback('📈 Long BTC', 'perps_buy_BTCUSDT'),
-          Markup.button.callback('📉 Short BTC', 'perps_sell_BTCUSDT')
-        ],
-        [
-          Markup.button.callback('📈 Long ETH', 'perps_buy_ETHUSDT'),
-          Markup.button.callback('📉 Short ETH', 'perps_sell_ETHUSDT')
-        ],
-        [
-          Markup.button.callback('📈 Long SOL', 'perps_buy_SOLUSDT'),
-          Markup.button.callback('📉 Short SOL', 'perps_sell_SOLUSDT')
-        ],
-        // Actions (Separated for clarity)
-        [
-          Markup.button.callback('🎯 Custom Pair', 'perps_custom_pair')
-        ],
-        [
-          Markup.button.callback('📊 Positions', 'positions')
-        ],
-        // Utilities
-        [
-          Markup.button.callback('💰 Balance', 'balance')
-        ],
-        // Trading Mode Switch
-        ...this.getTradingNavigation('perps')
+      if (topFuturesSymbols.length > 0) {
+        perpsText += '**Top Futures Pairs:**\n';
+        topFuturesSymbols.forEach(symbol => {
+          const emoji = symbolService.getSymbolEmoji(symbol.symbol);
+          const name = symbolService.getCleanSymbolName(symbol.symbol);
+          const price = parseFloat(symbol.lastPrice).toFixed(4);
+          const change = parseFloat(symbol.priceChangePercent).toFixed(2);
+          const changeEmoji = parseFloat(symbol.priceChangePercent) >= 0 ? '🟢' : '🔴';
+          perpsText += `• ${emoji} ${symbol.symbol} - $${price} ${changeEmoji}${change}%\n`;
+        });
+      } else {
+        perpsText += '**Popular Perps:**\n';
+        perpsText += '• Loading symbols...\n';
+      }
+
+      perpsText += '\n**Quick Actions:**';
+
+      const keyboardRows = [];
+
+      if (topFuturesSymbols.length > 0) {
+        // Create long/short buttons for top symbols
+        topFuturesSymbols.forEach(symbol => {
+          const emoji = symbolService.getSymbolEmoji(symbol.symbol);
+          const name = symbolService.getCleanSymbolName(symbol.symbol);
+          keyboardRows.push([
+            Markup.button.callback(`📈 Long ${name}`, `perps_buy_${symbol.symbol}`),
+            Markup.button.callback(`📉 Short ${name}`, `perps_sell_${symbol.symbol}`)
+          ]);
+        });
+      } else {
+        // Fallback to basic options when no symbols found
+        keyboardRows.push([
+          Markup.button.callback('📈 Open Long', 'perps_custom_pair'),
+          Markup.button.callback('📉 Open Short', 'perps_custom_pair')
+        ]);
+      }
+
+      // Actions (Separated for clarity)
+      keyboardRows.push([
+        Markup.button.callback('🎯 Custom Pair', 'perps_custom_pair')
       ]);
+      keyboardRows.push([
+        Markup.button.callback('📊 Positions', 'positions')
+      ]);
+      // Utilities
+      keyboardRows.push([
+        Markup.button.callback('💰 Balance', 'balance')
+      ]);
+      // Trading Mode Switch
+      keyboardRows.push(...this.getTradingNavigation('perps'));
+
+      const keyboard = Markup.inlineKeyboard(keyboardRows);
 
       console.log(`[DEBUG] Sending perps interface message...`);
       try {
