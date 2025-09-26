@@ -1,4 +1,6 @@
 import { AsterApiClient } from './aster';
+import { SpotAccountService } from './services/SpotAccountService';
+import { FuturesAccountService } from './services/FuturesAccountService';
 
 interface Trade {
   symbol: string;
@@ -41,9 +43,13 @@ export interface PnLResult {
 
 export class PnLCalculator {
   private apiClient: AsterApiClient;
+  private spotAccountService: SpotAccountService;
+  private futuresAccountService: FuturesAccountService;
 
   constructor(apiClient: AsterApiClient) {
     this.apiClient = apiClient;
+    this.spotAccountService = new SpotAccountService(apiClient);
+    this.futuresAccountService = new FuturesAccountService(apiClient);
   }
 
   async calculateComprehensivePnL(): Promise<PnLResult> {
@@ -94,99 +100,100 @@ export class PnLCalculator {
 
   private async calculateSpotPnL(): Promise<PnLResult> {
     try {
-      // Get spot account info
-      const accountInfo = await this.apiClient.getSpotAccount();
-      const balances = accountInfo.balances.filter((b: any) => parseFloat(b.free) + parseFloat(b.locked) > 0);
+      // Use SpotAccountService for better data handling
+      const portfolioSummary = await this.spotAccountService.getPortfolioSummary();
       
-      if (balances.length === 0) {
+      if (portfolioSummary.mainAssets.length === 0 && portfolioSummary.smallBalances.length === 0) {
         return {
           success: true,
-          message: 'No spot positions found',
+          message: 'No spot assets found',
           positions: [],
           totalCostBasis: 0,
-          totalCurrentValue: 0,
+          totalCurrentValue: portfolioSummary.totalUsdValue,
           totalUnrealizedPnL: 0,
           totalRealizedPnL: 0,
           totalPnL: 0,
           totalPnLPercent: 0,
-          usdtBalance: 0
+          usdtBalance: portfolioSummary.usdtBalance
         };
       }
 
-      const positions: Map<string, Position> = new Map();
+      const positions: Position[] = [];
+      const allAssets = [...portfolioSummary.mainAssets, ...portfolioSummary.smallBalances];
 
-      // Get trade history for each asset with balance
-      for (const balance of balances) {
-        const asset = balance.asset;
-        if (asset === 'USDT') continue;
+      // For spot trading, we need to calculate cost basis vs current value
+      for (const balance of allAssets) {
+        if (balance.asset === 'USDT') continue;
 
-        const symbol = `${asset}USDT`;
-        const amount = parseFloat(balance.free) + parseFloat(balance.locked);
-
-        if (amount <= 0) continue;
-
+        const symbol = `${balance.asset}USDT`;
+        
         try {
-          // Get trades for this symbol
+          // Get trades for this symbol to calculate cost basis
           const trades = await this.apiClient.getMyTrades(symbol);
           const validTrades = trades.filter(t => t.qty && t.price);
 
-          if (validTrades.length === 0) continue;
+          let totalCostBasis = 0;
+          let weightedAvgPrice = 0;
 
-          // Calculate weighted average cost using FIFO
-          const { remainingQuantity, remainingCostBasis, weightedAvgPrice } = 
-            this.calculateWeightedAverage(validTrades, amount);
-
-          if (remainingQuantity > 0) {
-            // Get current price
-            const currentPrice = await this.getCurrentPrice(symbol);
-            const currentValue = remainingQuantity * currentPrice;
-            const unrealizedPnl = currentValue - remainingCostBasis;
-
-            positions.set(asset, {
-              asset,
-              quantity: remainingQuantity,
-              totalCost: remainingCostBasis,
-              avgPrice: weightedAvgPrice,
-              trades: validTrades,
-              unrealizedPnl,
-              currentValue,
-              pnlPercent: remainingCostBasis > 0 ? (unrealizedPnl / remainingCostBasis * 100) : 0
-            });
+          if (validTrades.length > 0) {
+            // Calculate weighted average cost using FIFO
+            const { remainingCostBasis, weightedAvgPrice: avgPrice } = 
+              this.calculateWeightedAverage(validTrades, balance.total);
+            
+            totalCostBasis = remainingCostBasis;
+            weightedAvgPrice = avgPrice;
+          } else {
+            // If no trades found, use current value as cost basis (external transfer)
+            totalCostBasis = balance.usdValue || 0;
+            weightedAvgPrice = totalCostBasis / balance.total;
           }
+
+          const currentValue = balance.usdValue || 0;
+          const unrealizedPnl = currentValue - totalCostBasis;
+
+          positions.push({
+            asset: balance.asset,
+            quantity: balance.total,
+            totalCost: totalCostBasis,
+            avgPrice: weightedAvgPrice,
+            trades: validTrades,
+            unrealizedPnl,
+            currentValue,
+            pnlPercent: totalCostBasis > 0 ? (unrealizedPnl / totalCostBasis * 100) : 0
+          });
+
         } catch (error) {
           console.warn(`Failed to process ${symbol}:`, error);
-          continue;
+          // Still add the position with zero cost basis
+          positions.push({
+            asset: balance.asset,
+            quantity: balance.total,
+            totalCost: 0,
+            avgPrice: 0,
+            trades: [],
+            unrealizedPnl: balance.usdValue || 0,
+            currentValue: balance.usdValue || 0,
+            pnlPercent: 0
+          });
         }
       }
 
       // Calculate totals
-      let totalCostBasis = 0;
-      let totalCurrentValue = 0;
-      let totalUnrealizedPnL = 0;
-      const positionResults: Position[] = [];
-
-      for (const position of positions.values()) {
-        totalCostBasis += position.totalCost;
-        totalCurrentValue += position.currentValue;
-        totalUnrealizedPnL += position.unrealizedPnl;
-        positionResults.push(position);
-      }
-
-      // Get USDT balance
-      const usdtBalance = balances.find((b: any) => b.asset === 'USDT');
-      const usdtAmount = usdtBalance ? parseFloat(usdtBalance.free) + parseFloat(usdtBalance.locked || '0') : 0;
+      const totalCostBasis = positions.reduce((sum, p) => sum + p.totalCost, 0);
+      const totalCurrentValue = portfolioSummary.totalUsdValue;
+      const totalUnrealizedPnL = positions.reduce((sum, p) => sum + p.unrealizedPnl, 0);
 
       return {
         success: true,
         message: '✅ Spot P&L calculated',
-        positions: positionResults,
+        positions,
         totalCostBasis,
         totalCurrentValue,
         totalUnrealizedPnL,
-        totalRealizedPnL: 0, // TODO: Calculate from trade history
+        totalRealizedPnL: 0, // Would need income history API
         totalPnL: totalUnrealizedPnL,
         totalPnLPercent: totalCostBasis > 0 ? (totalUnrealizedPnL / totalCostBasis * 100) : 0,
-        usdtBalance: usdtAmount
+        usdtBalance: portfolioSummary.usdtBalance
       };
 
     } catch (error) {
@@ -200,59 +207,49 @@ export class PnLCalculator {
 
   private async calculatePerpPnL(): Promise<PnLResult> {
     try {
-      const positions = await this.apiClient.getPositionRisk();
-      const openPositions = positions.filter(p => parseFloat(p.positionAmt) !== 0);
+      // Use FuturesAccountService for better data handling
+      const portfolioSummary = await this.futuresAccountService.getPortfolioSummary();
 
-      if (openPositions.length === 0) {
+      if (portfolioSummary.openPositions.length === 0) {
         return {
           success: true,
           message: 'No futures positions found',
           positions: [],
           perpPositions: [],
           totalCostBasis: 0,
-          totalCurrentValue: 0,
-          totalUnrealizedPnL: 0,
+          totalCurrentValue: portfolioSummary.totalWalletBalance,
+          totalUnrealizedPnL: portfolioSummary.totalUnrealizedPnl,
           totalRealizedPnL: 0,
-          totalPnL: 0,
+          totalPnL: portfolioSummary.totalUnrealizedPnl,
           totalPnLPercent: 0,
-          usdtBalance: 0
+          usdtBalance: portfolioSummary.totalWalletBalance
         };
       }
 
-      let totalUnrealizedPnL = 0;
-      const perpResults = [];
-
-      for (const position of openPositions) {
-        const unrealizedPnl = parseFloat(position.unrealizedPnl);
-        totalUnrealizedPnL += unrealizedPnl;
-        perpResults.push({
-          symbol: position.symbol,
-          size: Math.abs(parseFloat(position.positionAmt)),
-          side: parseFloat(position.positionAmt) > 0 ? 'LONG' : 'SHORT',
-          entryPrice: parseFloat(position.entryPrice),
-          leverage: parseFloat(position.leverage),
-          unrealizedPnl,
-          pnlPercent: parseFloat(position.entryPrice) > 0 ? 
-            (unrealizedPnl / (Math.abs(parseFloat(position.positionAmt)) * parseFloat(position.entryPrice)) * 100) : 0
-        });
-      }
-
-      // Get futures account info for balance
-      const accountInfo = await this.apiClient.getAccountInfo();
-      const totalWalletBalance = parseFloat(accountInfo.totalWalletBalance || '0');
+      // Convert to PnL format
+      const perpResults = portfolioSummary.openPositions.map(position => ({
+        symbol: position.symbol,
+        size: position.size,
+        side: position.side,
+        entryPrice: position.entryPrice,
+        leverage: position.leverage,
+        unrealizedPnl: position.unrealizedPnl,
+        pnlPercent: position.pnlPercent
+      }));
 
       return {
         success: true,
         message: '✅ Futures P&L calculated',
         positions: [],
         perpPositions: perpResults,
-        totalCostBasis: 0, // For futures, this would be initial margin
-        totalCurrentValue: totalWalletBalance,
-        totalUnrealizedPnL,
-        totalRealizedPnL: 0, // TODO: Get from income history
-        totalPnL: totalUnrealizedPnL,
-        totalPnLPercent: 0,
-        usdtBalance: totalWalletBalance
+        totalCostBasis: 0, // For futures, margin is more relevant than cost basis
+        totalCurrentValue: portfolioSummary.totalWalletBalance,
+        totalUnrealizedPnL: portfolioSummary.totalUnrealizedPnl,
+        totalRealizedPnL: 0, // Would need income history API
+        totalPnL: portfolioSummary.totalUnrealizedPnl,
+        totalPnLPercent: portfolioSummary.totalWalletBalance > 0 ? 
+          (portfolioSummary.totalUnrealizedPnl / portfolioSummary.totalWalletBalance * 100) : 0,
+        usdtBalance: portfolioSummary.totalWalletBalance
       };
 
     } catch (error) {

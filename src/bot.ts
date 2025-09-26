@@ -14,6 +14,8 @@ import { TradeParser, TradePreviewGenerator } from './tradeparser';
 import { NotificationManager } from './notifications';
 import { PnLCalculator } from './pnl';
 import { SymbolService } from './services/SymbolService';
+import { SpotAccountService } from './services/SpotAccountService';
+import { FuturesAccountService } from './services/FuturesAccountService';
 
 // Load environment variables
 dotenv.config();
@@ -38,6 +40,8 @@ class AsterTradingBot {
   private pendingTrades = new Map<number, any>();
   private conversationStates = new Map<number, UserState['conversationState']>();
   private symbolServices = new Map<number, SymbolService>();
+  private spotAccountServices = new Map<number, SpotAccountService>();
+  private futuresAccountServices = new Map<number, FuturesAccountService>();
 
   constructor() {
     this.config = this.loadConfig();
@@ -803,6 +807,22 @@ Please send your **API Key** now:
       this.symbolServices.set(userId, new SymbolService(apiClient));
     }
     return this.symbolServices.get(userId)!;
+  }
+
+  private async getSpotAccountService(userId: number): Promise<SpotAccountService> {
+    if (!this.spotAccountServices.has(userId)) {
+      const apiClient = await this.getOrCreateApiClient(userId);
+      this.spotAccountServices.set(userId, new SpotAccountService(apiClient));
+    }
+    return this.spotAccountServices.get(userId)!;
+  }
+
+  private async getFuturesAccountService(userId: number): Promise<FuturesAccountService> {
+    if (!this.futuresAccountServices.has(userId)) {
+      const apiClient = await this.getOrCreateApiClient(userId);
+      this.futuresAccountServices.set(userId, new FuturesAccountService(apiClient));
+    }
+    return this.futuresAccountServices.get(userId)!;
   }
 
   private async handleCustomPairInput(ctx: BotContext, text: string): Promise<void> {
@@ -1764,61 +1784,78 @@ ${trade.maxSlippageExceeded ? '\n❌ **Max slippage exceeded**' : ''}
     }
 
     try {
-      const apiClient = await this.getOrCreateApiClient(ctx.userState.userId);
+      const userId = ctx.userState.userId;
       
-      // Get both spot and futures balances
-      const [spotAccount, futuresAccount] = await Promise.all([
-        apiClient.getSpotAccount().catch(() => null),
-        apiClient.getAccountInfo().catch(() => null)
+      // Get both services
+      const [spotService, futuresService] = await Promise.all([
+        this.getSpotAccountService(userId),
+        this.getFuturesAccountService(userId)
       ]);
       
-      let balanceText = ['💰 **Account Balances**', ''];
+      // Get portfolios with proper error handling
+      const [spotPortfolio, futuresPortfolio] = await Promise.all([
+        spotService.getPortfolioSummary().catch((error) => {
+          console.warn('[Balance] Spot portfolio failed:', error);
+          return null;
+        }),
+        futuresService.getPortfolioSummary().catch((error) => {
+          console.warn('[Balance] Futures portfolio failed:', error);
+          return null;
+        })
+      ]);
       
-      // Spot Balance Section
-      if (spotAccount && spotAccount.balances) {
-        balanceText.push('🏪 **Spot Trading**');
-        
-        // Filter and show only balances > 0
-        const significantBalances = spotAccount.balances
-          .filter((balance: any) => parseFloat(balance.free) > 0 || parseFloat(balance.locked) > 0)
-          .slice(0, 10); // Limit to top 10 to avoid message length issues
-        
-        if (significantBalances.length > 0) {
-          significantBalances.forEach((balance: any) => {
-            const free = parseFloat(balance.free);
-            const locked = parseFloat(balance.locked);
-            const total = free + locked;
-            
-            if (total > 0.001) { // Only show if > 0.001
-              balanceText.push(`• ${balance.asset}: ${total.toFixed(6)} (Free: ${free.toFixed(6)})`);
-            }
-          });
-        } else {
-          balanceText.push('• No significant spot balances');
-        }
-        
-        balanceText.push('');
+      let balanceText = '💰 **ACCOUNT OVERVIEW**\n';
+      balanceText += '═'.repeat(50) + '\n\n';
+      
+      // Combined summary
+      let totalValue = 0;
+      if (spotPortfolio) totalValue += spotPortfolio.totalUsdValue;
+      if (futuresPortfolio) totalValue += futuresPortfolio.totalWalletBalance;
+      
+      balanceText += `🏦 **Total Portfolio Value:** $${totalValue.toFixed(2)}\n\n`;
+      
+      // Spot Portfolio
+      if (spotPortfolio) {
+        balanceText += spotService.formatSpotPortfolio(spotPortfolio);
+        balanceText += '\n';
+      } else {
+        balanceText += '🏪 **SPOT PORTFOLIO**\n';
+        balanceText += '❌ Unable to load spot balances\n\n';
       }
       
-      // Futures Balance Section
-      if (futuresAccount) {
-        balanceText.push('⚡ **Futures Trading**');
-        balanceText.push(`💵 Total Wallet Balance: $${parseFloat(futuresAccount.totalWalletBalance).toFixed(2)}`);
-        balanceText.push(`📊 Total Margin Balance: $${parseFloat(futuresAccount.totalMarginBalance).toFixed(2)}`);
-        balanceText.push(`✅ Available Balance: $${parseFloat(futuresAccount.availableBalance).toFixed(2)}`);
-        balanceText.push(`📈 Unrealized PnL: $${parseFloat(futuresAccount.totalUnrealizedPnl).toFixed(2)}`);
-        balanceText.push('');
-        balanceText.push(`🏦 **Margin Info**`);
-        balanceText.push(`• Position Margin: $${parseFloat(futuresAccount.totalPositionInitialMargin).toFixed(2)}`);
-        balanceText.push(`• Order Margin: $${parseFloat(futuresAccount.totalOpenOrderInitialMargin).toFixed(2)}`);
+      // Futures Portfolio
+      if (futuresPortfolio) {
+        balanceText += futuresService.formatFuturesPortfolio(futuresPortfolio);
+      } else {
+        balanceText += '⚡ **FUTURES PORTFOLIO**\n';
+        balanceText += '❌ Unable to load futures balances\n';
       }
       
       // If both failed
-      if (!spotAccount && !futuresAccount) {
+      if (!spotPortfolio && !futuresPortfolio) {
         throw new Error('Failed to fetch both spot and futures balances');
       }
 
-      await ctx.reply(balanceText.join('\n'), { parse_mode: 'Markdown' });
+      // Create interactive buttons
+      const keyboard = Markup.inlineKeyboard([
+        [
+          Markup.button.callback('🏪 Spot Trading', 'trade_spot'),
+          Markup.button.callback('⚡ Futures Trading', 'trade_perps')
+        ],
+        [
+          Markup.button.callback('📊 P&L Analysis', 'pnl'),
+          Markup.button.callback('📈 Positions', 'positions')
+        ],
+        [
+          Markup.button.callback('🔄 Refresh', 'balance'),
+          Markup.button.callback('⚙️ Settings', 'settings')
+        ]
+      ]);
+
+      await ctx.reply(balanceText, { 
+        parse_mode: 'Markdown',
+        ...keyboard 
+      });
 
     } catch (error) {
       console.error('Balance command error:', error);

@@ -3,6 +3,8 @@ import { BaseHandler, BotContext } from './BaseHandler';
 import { BotEventEmitter, EventTypes } from '../events/EventEmitter';
 import { AsterApiClient } from '../aster';
 import { SymbolService } from '../services/SymbolService';
+import { SpotAccountService } from '../services/SpotAccountService';
+import { FuturesAccountService } from '../services/FuturesAccountService';
 
 export interface TradingHandlerDependencies {
   eventEmitter: BotEventEmitter;
@@ -26,6 +28,8 @@ export class TradingHandler extends BaseHandler {
   private apiClientService: ApiClientService;
   private priceService: PriceService;
   private symbolService: SymbolService | null = null;
+  private spotAccountService: SpotAccountService | null = null;
+  private futuresAccountService: FuturesAccountService | null = null;
 
   constructor(dependencies: TradingHandlerDependencies) {
     super(dependencies.eventEmitter);
@@ -39,6 +43,22 @@ export class TradingHandler extends BaseHandler {
       this.symbolService = new SymbolService(apiClient);
     }
     return this.symbolService;
+  }
+
+  private async getSpotAccountService(userId: number): Promise<SpotAccountService> {
+    if (!this.spotAccountService) {
+      const apiClient = await this.apiClientService.getOrCreateClient(userId);
+      this.spotAccountService = new SpotAccountService(apiClient);
+    }
+    return this.spotAccountService;
+  }
+
+  private async getFuturesAccountService(userId: number): Promise<FuturesAccountService> {
+    if (!this.futuresAccountService) {
+      const apiClient = await this.apiClientService.getOrCreateClient(userId);
+      this.futuresAccountService = new FuturesAccountService(apiClient);
+    }
+    return this.futuresAccountService;
   }
 
   async handleSpotTrading(ctx: BotContext, customSymbol?: string): Promise<void> {
@@ -62,8 +82,8 @@ export class TradingHandler extends BaseHandler {
           action: 'BUY' // Default for spot interface
         });
 
-        const apiClient = await this.apiClientService.getOrCreateClient(ctx.userState.userId);
-        const availableUsdt = await this.getSpotBalance(apiClient, ctx);
+        const spotAccountService = await this.getSpotAccountService(ctx.userState.userId);
+        const availableUsdt = await spotAccountService.getUsdtBalance();
 
         if (customSymbol) {
           await this.showCustomSpotInterface(ctx, customSymbol, availableUsdt);
@@ -99,14 +119,14 @@ export class TradingHandler extends BaseHandler {
           action: 'BUY' // Default for perps interface
         });
 
-        const apiClient = await this.apiClientService.getOrCreateClient(ctx.userState.userId);
-        const accountInfo = await apiClient.getAccountInfo();
-        const availableBalance = parseFloat(accountInfo.availableBalance || '0');
+        const futuresAccountService = await this.getFuturesAccountService(ctx.userState.userId);
+        const availableBalance = await futuresAccountService.getAvailableBalance();
 
         if (customSymbol) {
           await this.showCustomPerpsInterface(ctx, customSymbol, availableBalance);
         } else {
-          await this.showPerpsTradingInterface(ctx, availableBalance, accountInfo);
+          const portfolioSummary = await futuresAccountService.getPortfolioSummary();
+          await this.showPerpsTradingInterface(ctx, availableBalance, portfolioSummary);
         }
 
         await this.emitNavigation(ctx, 'trading_menu', 'perps_trading', { customSymbol });
@@ -116,30 +136,6 @@ export class TradingHandler extends BaseHandler {
     );
   }
 
-  private async getSpotBalance(apiClient: AsterApiClient, ctx: BotContext): Promise<number> {
-    try {
-      const accountInfo = await apiClient.getSpotAccount();
-      const usdtBalance = accountInfo.balances.find((b: any) => b.asset === 'USDT');
-      const balance = usdtBalance ? parseFloat(usdtBalance.free) : 0;
-      
-      await this.emitApiCall(ctx, '/api/v3/account', 'GET', true);
-      return balance;
-    } catch (spotError) {
-      console.warn('[TradingHandler] Spot API failed, trying futures fallback:', spotError);
-      
-      try {
-        const futuresAccount = await apiClient.getAccountInfo();
-        const balance = parseFloat(futuresAccount.availableBalance || '0');
-        
-        await this.emitApiCall(ctx, '/fapi/v1/account', 'GET', true);
-        return balance;
-      } catch (futuresError) {
-        await this.emitApiCall(ctx, '/fapi/v1/account', 'GET', false);
-        console.error('[TradingHandler] Both APIs failed:', futuresError);
-        return 0;
-      }
-    }
-  }
 
   private async showSpotTradingInterface(ctx: BotContext, availableUsdt: number): Promise<void> {
     const symbolService = await this.getSymbolService(ctx.userState!.userId);
@@ -217,9 +213,9 @@ export class TradingHandler extends BaseHandler {
   private async showPerpsTradingInterface(
     ctx: BotContext, 
     availableBalance: number, 
-    accountInfo: any
+    portfolioSummary: any
   ): Promise<void> {
-    const totalWallet = parseFloat(accountInfo.totalWalletBalance || '0');
+    const totalWallet = portfolioSummary.totalWalletBalance;
     const symbolService = await this.getSymbolService(ctx.userState!.userId);
     const topFuturesSymbols = await symbolService.getTopSymbolsByVolume(3, 'futures');
 
