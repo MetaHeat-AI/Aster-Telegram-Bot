@@ -31,18 +31,16 @@ export class SymbolService {
   }
 
   async getTopSymbolsByVolume(count: number = 10, type: 'spot' | 'futures' | 'both' = 'both'): Promise<SymbolData[]> {
-    const symbols = await this.getAvailableSymbols();
-    
-    // Filter by type
-    let filteredSymbols = symbols;
+    // For better separation, fetch symbols directly from appropriate API
     if (type === 'spot') {
-      filteredSymbols = symbols.filter(s => s.isSpotAvailable);
+      return this.getTopSpotSymbolsByVolume(count);
     } else if (type === 'futures') {
-      filteredSymbols = symbols.filter(s => s.isFuturesAvailable);
+      return this.getTopFuturesSymbolsByVolume(count);
     }
 
-    // Filter USDT pairs only
-    const usdtPairs = filteredSymbols.filter(s => s.symbol.endsWith('USDT'));
+    // For 'both', use combined data
+    const symbols = await this.getAvailableSymbols();
+    const usdtPairs = symbols.filter(s => s.symbol.endsWith('USDT'));
     
     // Sort by quote volume (trading volume in USDT)
     const sortedByVolume = usdtPairs.sort((a, b) => {
@@ -52,6 +50,110 @@ export class SymbolService {
     });
 
     return sortedByVolume.slice(0, count);
+  }
+
+  async getTopSpotSymbolsByVolume(count: number = 10): Promise<SymbolData[]> {
+    try {
+      console.log('[SymbolService] Fetching top spot symbols by volume...');
+      
+      // Get spot tickers directly for accurate spot volume
+      const [spotTickers, spotExchangeInfo] = await Promise.all([
+        this.apiClient.getAllSpotTickers(),
+        this.safeGetSpotExchangeInfo()
+      ]);
+
+      // Get available spot symbols
+      const spotSymbols = new Set(
+        (spotExchangeInfo?.symbols || [])
+          .filter((s: any) => s.status === 'TRADING')
+          .map((s: any) => s.symbol)
+      );
+
+      // Filter to only USDT pairs that are available on spot
+      const spotUsdtTickers = spotTickers
+        .filter(ticker => 
+          ticker.symbol.endsWith('USDT') && 
+          spotSymbols.has(ticker.symbol)
+        )
+        .sort((a, b) => {
+          const volumeA = parseFloat(a.quoteVolume || '0');
+          const volumeB = parseFloat(b.quoteVolume || '0');
+          return volumeB - volumeA;
+        })
+        .slice(0, count);
+
+      // Convert to SymbolData format
+      return spotUsdtTickers.map(ticker => ({
+        symbol: ticker.symbol,
+        lastPrice: ticker.lastPrice,
+        volume: ticker.volume,
+        quoteVolume: ticker.quoteVolume || '0',
+        priceChangePercent: ticker.priceChangePercent,
+        isSpotAvailable: true,
+        isFuturesAvailable: false // We don't know here, but for spot-only call this is fine
+      }));
+
+    } catch (error) {
+      console.error('[SymbolService] Failed to get top spot symbols:', error);
+      // Fallback to cached data
+      const symbols = await this.getAvailableSymbols();
+      return symbols
+        .filter(s => s.isSpotAvailable && s.symbol.endsWith('USDT'))
+        .sort((a, b) => parseFloat(b.quoteVolume || '0') - parseFloat(a.quoteVolume || '0'))
+        .slice(0, count);
+    }
+  }
+
+  async getTopFuturesSymbolsByVolume(count: number = 10): Promise<SymbolData[]> {
+    try {
+      console.log('[SymbolService] Fetching top futures symbols by volume...');
+      
+      // Get futures tickers directly for accurate futures volume
+      const [futuresTickers, futuresExchangeInfo] = await Promise.all([
+        this.apiClient.getAllFuturesTickers(),
+        this.safeGetFuturesExchangeInfo()
+      ]);
+
+      // Get available futures symbols
+      const futuresSymbols = new Set(
+        (futuresExchangeInfo?.symbols || [])
+          .filter((s: any) => s.status === 'TRADING')
+          .map((s: any) => s.symbol)
+      );
+
+      // Filter to only USDT pairs that are available on futures
+      const futuresUsdtTickers = futuresTickers
+        .filter(ticker => 
+          ticker.symbol.endsWith('USDT') && 
+          futuresSymbols.has(ticker.symbol)
+        )
+        .sort((a, b) => {
+          const volumeA = parseFloat(a.quoteVolume || '0');
+          const volumeB = parseFloat(b.quoteVolume || '0');
+          return volumeB - volumeA;
+        })
+        .slice(0, count);
+
+      // Convert to SymbolData format
+      return futuresUsdtTickers.map(ticker => ({
+        symbol: ticker.symbol,
+        lastPrice: ticker.lastPrice,
+        volume: ticker.volume,
+        quoteVolume: ticker.quoteVolume || '0',
+        priceChangePercent: ticker.priceChangePercent,
+        isSpotAvailable: false, // We don't know here, but for futures-only call this is fine
+        isFuturesAvailable: true
+      }));
+
+    } catch (error) {
+      console.error('[SymbolService] Failed to get top futures symbols:', error);
+      // Fallback to cached data
+      const symbols = await this.getAvailableSymbols();
+      return symbols
+        .filter(s => s.isFuturesAvailable && s.symbol.endsWith('USDT'))
+        .sort((a, b) => parseFloat(b.quoteVolume || '0') - parseFloat(a.quoteVolume || '0'))
+        .slice(0, count);
+    }
   }
 
   async getSpotSymbols(limit?: number): Promise<SymbolData[]> {
@@ -119,8 +221,23 @@ export class SymbolService {
         const spotData = spotTickers.find(t => t.symbol === symbol);
         const futuresData = futuresTickers.find(t => t.symbol === symbol);
         
-        // Use the data source with higher volume, or futures as fallback
-        const primaryData = futuresData || spotData;
+        // Skip if no data available for this symbol
+        if (!spotData && !futuresData) continue;
+
+        // Use appropriate data source based on availability and preference
+        let primaryData;
+        if (spotSymbols.has(symbol) && spotData) {
+          // If spot available, prefer spot data for consistency
+          primaryData = spotData;
+        } else if (futuresSymbols.has(symbol) && futuresData) {
+          // If only futures available, use futures data
+          primaryData = futuresData;
+        } else {
+          // Fallback to whatever data we have
+          primaryData = futuresData || spotData;
+        }
+
+        // Skip if still no data (should not happen due to earlier check)
         if (!primaryData) continue;
 
         const symbolData: SymbolData = {
