@@ -412,14 +412,38 @@ export class AsterApiClient {
     stopPrice?: string;
     timeInForce?: 'GTC' | 'IOC' | 'FOK';
   }): Promise<any> {
-    const signedRequest = AsterSigner.signPostRequest('/api/v3/order', orderParams, this.apiSecret);
-    const response = await this.axios.post(signedRequest.url);
+    // Use spot API base URL and endpoint
+    const spotBaseUrl = 'https://sapi.asterdex.com';
+    const signedRequest = AsterSigner.signPostRequest('/api/v1/order', orderParams, this.apiSecret);
+    
+    // Create axios instance for spot API
+    const spotAxios = axios.create({ 
+      baseURL: spotBaseUrl,
+      headers: {
+        'X-MBX-APIKEY': this.apiKey,
+        'Content-Type': 'application/json'
+      }
+    });
+    
+    const response = await spotAxios.post(signedRequest.url);
     return response.data;
   }
 
   async getSpotAccount(): Promise<{ balances: Array<{ asset: string; free: string; locked: string }> }> {
-    const signedRequest = AsterSigner.signGetRequest('/api/v3/account', {}, this.apiSecret);
-    const response = await this.axios.get<{ balances: Array<{ asset: string; free: string; locked: string }> }>(signedRequest.url);
+    // Use spot API base URL and endpoint
+    const spotBaseUrl = 'https://sapi.asterdex.com';
+    const signedRequest = AsterSigner.signGetRequest('/api/v1/account', {}, this.apiSecret);
+    
+    // Create axios instance for spot API
+    const spotAxios = axios.create({ 
+      baseURL: spotBaseUrl,
+      headers: {
+        'X-MBX-APIKEY': this.apiKey,
+        'Content-Type': 'application/json'
+      }
+    });
+    
+    const response = await spotAxios.get<{ balances: Array<{ asset: string; free: string; locked: string }> }>(signedRequest.url);
     return response.data;
   }
 

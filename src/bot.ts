@@ -2970,22 +2970,15 @@ ${preview.maxSlippageExceeded ? '\n❌ **Max slippage exceeded**' : ''}
     } catch (error: any) {
       console.error('Spot preset order error:', error);
       
-      // Check if this is a 404 error indicating spot trading is not supported
+      // Log error details for debugging
+      console.error('Spot preset order error details:', error);
+      
       if (error.code === 'NOT_FOUND' || (error.message && error.message.includes('404'))) {
-        await ctx.answerCbQuery('❌ Spot trading not supported');
-        await ctx.reply(`⚠️ **Spot Trading Not Available**\n\n` +
-          `This exchange doesn't support spot trading endpoints.\n` +
-          `Please use **Futures Trading** instead.\n\n` +
-          `🔄 Redirecting to futures interface...`);
-        
-        // Redirect to futures trading
-        setTimeout(async () => {
-          try {
-            await this.handlePerpsTradingInterface(ctx, symbol);
-          } catch (redirectError) {
-            console.error('Failed to redirect to futures:', redirectError);
-          }
-        }, 1000);
+        await ctx.answerCbQuery('❌ Spot API endpoint error');
+        await ctx.reply(`❌ **Spot Trading API Error**\n\n` +
+          `The spot trading endpoint is not responding correctly.\n` +
+          `Error: ${error.message || 'Unknown error'}\n\n` +
+          `Please try again in a moment or contact support if the issue persists.`);
         return;
       }
       
