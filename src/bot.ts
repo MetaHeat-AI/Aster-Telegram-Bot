@@ -3,7 +3,7 @@ import { Telegraf, Context, Markup } from 'telegraf';
 import { Update } from 'telegraf/types';
 import express from 'express';
 
-import { BotConfig, BotConfigSchema, UserState, TradeCommand, OrderBookDepth } from './types';
+import { BotConfig, BotConfigSchema, UserState, TradeCommand, OrderBookDepth, NewOrderRequest } from './types';
 import { DatabaseManager } from './db';
 import { EncryptionManager } from './encryption';
 import { AsterApiClient } from './aster';
@@ -12,6 +12,7 @@ import { PriceProtectionManager } from './priceguard';
 import { SettingsManager } from './settings';
 import { TradeParser, TradePreviewGenerator } from './tradeparser';
 import { NotificationManager } from './notifications';
+import { PnLCalculator } from './pnl';
 
 // Load environment variables
 dotenv.config();
@@ -185,22 +186,34 @@ Get started by linking your Aster API credentials:
     // Help command
     this.bot.command('help', async (ctx) => {
       const helpText = `
-📖 **Command Reference**
+🤖 **Aster DEX Trading Bot - Complete Guide**
 
-**Trading Commands:**
+**🚀 Quick Trading:**
+• \`/pnl\` - Comprehensive P&L analysis (spot + futures)
+• \`/positions\` - View positions with quick trade buttons
+• Click ⚡ **Quick Trade** for instant buy/sell actions
+
+**📈 Futures Trading:**
 • \`/buy BTCUSDT 100u x5 sl1% tp3%\` - Buy with quote amount
 • \`/sell ETHUSDT 0.25 x3 reduce\` - Sell with base amount  
-• \`/positions\` - View open positions
-• \`/balance\` - Check account balance
 
-**Settings & Management:**
-• \`/settings\` - Configure bot settings
-• \`/link\` - Link API credentials
+**🏪 Spot Trading:**
+• \`/spot buy BTCUSDT 100u\` - Spot market buy
+• \`/spot sell BTCUSDT 0.25\` - Spot market sell
+• \`/spot limit buy BTCUSDT 0.1 67000\` - Spot limit order
+
+**💰 Account Management:**
+• \`/balance\` - Account balance (futures + spot)
+• \`/pnl\` - Real-time P&L with weighted averages
+
+**⚙️ Settings & Setup:**
+• \`/settings\` - Configure trading preferences
+• \`/link\` - Link API credentials securely
 • \`/unlink\` - Remove API credentials
 
-**Market Data:**
-• \`/price SYMBOL\` - Get current price
-• \`/funding SYMBOL\` - Check funding rates
+**📊 Market Data:**
+• \`/price SYMBOL\` - Current price & 24h change
+• \`/funding SYMBOL\` - Funding rates (futures)
 
 **Examples:**
 ${TradeParser.generateExamples().map(ex => `• \`${ex}\``).join('\n')}
@@ -286,6 +299,16 @@ ${TradeParser.generateExamples().map(ex => `• \`${ex}\``).join('\n')}
     // Balance command
     this.bot.command('balance', async (ctx) => {
       await this.handleBalanceCommand(ctx);
+    });
+
+    // P&L command
+    this.bot.command('pnl', async (ctx) => {
+      await this.handlePnLCommand(ctx);
+    });
+
+    // Spot trading command
+    this.bot.command('spot', async (ctx) => {
+      await this.handleSpotCommand(ctx);
     });
 
     // Price command
@@ -422,6 +445,30 @@ ${TradeParser.generateExamples().map(ex => `• \`${ex}\``).join('\n')}
       const symbol = ctx.match[2];
       await this.handlePositionAction(ctx, action, symbol);
     });
+
+    // Quick trading actions
+    this.bot.action(/^quick_trade_(.+)$/, async (ctx) => {
+      const symbol = ctx.match[1];
+      await this.showQuickTradingPanel(ctx, symbol);
+    });
+
+    // Quick buy/sell actions
+    this.bot.action(/^quick_(buy|sell)_(\d+)([up%])_(.+)$/, async (ctx) => {
+      const side = ctx.match[1];
+      const amount = parseInt(ctx.match[2]);
+      const unit = ctx.match[3]; // 'u' for USDT, 'p' for percentage
+      const symbol = ctx.match[4];
+      await this.handleQuickTrade(ctx, side, amount, unit, symbol);
+    });
+
+    // P&L refresh action
+    this.bot.action('refresh_pnl', async (ctx) => {
+      await this.handlePnLCommand(ctx);
+    });
+
+    this.bot.action('pnl_analysis', async (ctx) => {
+      await this.handlePnLCommand(ctx);
+    });
   }
 
   private setupServer(): void {
@@ -504,6 +551,12 @@ Please send your **API Key** now:
           break;
         case 'confirming_unlink':
           await this.handleUnlinkConfirmation(ctx, text);
+          break;
+        case 'price':
+          await this.handlePriceInput(ctx, text);
+          break;
+        case 'amount':
+          await this.handleAmountInput(ctx, text);
           break;
         default:
           // Clear invalid state
@@ -610,6 +663,94 @@ Please send your **API Key** now:
     } else {
       await ctx.reply('❌ Unlink cancelled.');
     }
+  }
+
+  private async handlePriceInput(ctx: BotContext, text: string): Promise<void> {
+    if (!ctx.userState?.conversationState) return;
+
+    const price = parseFloat(text.replace(/[,$]/g, ''));
+    if (isNaN(price) || price <= 0) {
+      await ctx.reply('❌ Invalid price. Please enter a valid number (e.g., 45000 or 0.025):');
+      return;
+    }
+
+    const apiClient = this.userSessions.get(ctx.from!.id);
+    if (!apiClient) {
+      await ctx.reply('❌ API session not found. Please try linking your credentials again.');
+      this.clearConversationState(ctx);
+      return;
+    }
+
+    const state = this.conversationStates.get(ctx.from!.id);
+    if (!state || !state.symbol) {
+      await ctx.reply('❌ Session expired. Please try again.');
+      this.clearConversationState(ctx);
+      return;
+    }
+
+    try {
+      let result;
+      if (state.type === 'expecting_stop_loss') {
+        result = await apiClient.setStopLoss(state.symbol, price);
+        await ctx.reply(`✅ Stop loss set for ${state.symbol} at $${price}\nOrder ID: ${result.orderId}`);
+      } else if (state.type === 'expecting_take_profit') {
+        result = await apiClient.setTakeProfit(state.symbol, price);
+        await ctx.reply(`✅ Take profit set for ${state.symbol} at $${price}\nOrder ID: ${result.orderId}`);
+      }
+    } catch (error: any) {
+      console.error('Price input error:', error);
+      await ctx.reply(`❌ Failed to set ${state.type?.replace('expecting_', '').replace('_', ' ')}: ${error.message}`);
+    }
+
+    this.clearConversationState(ctx);
+  }
+
+  private async handleAmountInput(ctx: BotContext, text: string): Promise<void> {
+    if (!ctx.userState?.conversationState) return;
+
+    const amount = parseFloat(text.replace(/[,$]/g, ''));
+    if (isNaN(amount) || amount <= 0) {
+      await ctx.reply('❌ Invalid amount. Please enter a valid number (e.g., 100 or 50.5):');
+      return;
+    }
+
+    const apiClient = this.userSessions.get(ctx.from!.id);
+    if (!apiClient) {
+      await ctx.reply('❌ API session not found. Please try linking your credentials again.');
+      this.clearConversationState(ctx);
+      return;
+    }
+
+    const state = this.conversationStates.get(ctx.from!.id);
+    if (!state || !state.symbol || !state.marginType) {
+      await ctx.reply('❌ Session expired. Please try again.');
+      this.clearConversationState(ctx);
+      return;
+    }
+
+    try {
+      const marginType = state.marginType === 'add' ? 1 : 2;
+      const result = await apiClient.modifyPositionMargin(state.symbol, amount, marginType);
+      
+      if (result.code === 200) {
+        const action = state.marginType === 'add' ? 'Added' : 'Reduced';
+        await ctx.reply(`✅ ${action} $${amount} margin for ${state.symbol}`);
+      } else {
+        await ctx.reply(`❌ Failed to modify margin: ${result.msg}`);
+      }
+    } catch (error: any) {
+      console.error('Amount input error:', error);
+      await ctx.reply(`❌ Failed to modify margin: ${error.message}`);
+    }
+
+    this.clearConversationState(ctx);
+  }
+
+  private clearConversationState(ctx: BotContext): void {
+    if (ctx.userState) {
+      ctx.userState.conversationState = undefined;
+    }
+    this.conversationStates.delete(ctx.from!.id);
   }
 
   private async handleTradePreview(ctx: BotContext, command: TradeCommand): Promise<void> {
@@ -842,6 +983,50 @@ ${trade.maxSlippageExceeded ? '\n❌ **Max slippage exceeded**' : ''}
     }
   }
 
+  private async handlePnLCommand(ctx: BotContext): Promise<void> {
+    if (!ctx.userState?.isLinked) {
+      await ctx.reply('❌ Please link your API credentials first using /link');
+      return;
+    }
+
+    const apiClient = this.userSessions.get(ctx.from!.id);
+    if (!apiClient) {
+      await ctx.reply('❌ API session not found. Please try linking your credentials again.');
+      return;
+    }
+
+    try {
+      await ctx.reply('🔄 Calculating comprehensive P&L...');
+      
+      const pnlCalculator = new PnLCalculator(apiClient);
+      const pnlResult = await pnlCalculator.calculateComprehensivePnL();
+      
+      if (!pnlResult.success) {
+        await ctx.reply(pnlResult.message);
+        return;
+      }
+
+      const formattedPnL = pnlCalculator.formatPnL(pnlResult);
+      
+      const keyboard = Markup.inlineKeyboard([
+        [
+          Markup.button.callback('🔄 Refresh', 'refresh_pnl'),
+          Markup.button.callback('📊 Positions', 'positions')
+        ],
+        [
+          Markup.button.callback('💰 Balance', 'balance'),
+          Markup.button.callback('📈 Trade', 'trade_interface')
+        ]
+      ]);
+
+      await ctx.reply(formattedPnL, { parse_mode: 'Markdown', ...keyboard });
+
+    } catch (error) {
+      console.error('P&L command error:', error);
+      await ctx.reply('❌ Failed to calculate P&L. Please try again.');
+    }
+  }
+
   private async handlePositionsCommand(ctx: BotContext): Promise<void> {
     if (!ctx.userState?.isLinked) {
       await ctx.reply('❌ Please link your API credentials first using /link');
@@ -876,11 +1061,17 @@ ${trade.maxSlippageExceeded ? '\n❌ **Max slippage exceeded**' : ''}
         ].join('\n');
       });
 
-      const keyboard = Markup.inlineKeyboard(
-        openPositions.map(pos => [
-          Markup.button.callback(`📊 ${pos.symbol}`, `position_manage_${pos.symbol}`)
-        ])
-      );
+      // Enhanced positions with quick trading buttons
+      const keyboard = Markup.inlineKeyboard([
+        ...openPositions.map(pos => [
+          Markup.button.callback(`📊 ${pos.symbol}`, `position_manage_${pos.symbol}`),
+          Markup.button.callback(`⚡ Quick Trade`, `quick_trade_${pos.symbol}`)
+        ]),
+        [
+          Markup.button.callback('🔄 Refresh', 'positions'),
+          Markup.button.callback('📈 P&L Analysis', 'pnl_analysis')
+        ]
+      ]);
 
       await ctx.reply(positionsText, { parse_mode: 'Markdown', ...keyboard });
 
@@ -957,8 +1148,452 @@ ${trade.maxSlippageExceeded ? '\n❌ **Max slippage exceeded**' : ''}
   }
 
   private async handlePositionAction(ctx: BotContext, action: string, symbol: string): Promise<void> {
-    // Implementation would handle position management actions
-    await ctx.reply(`Position action: ${action} for ${symbol} (Implementation needed)`);
+    if (!ctx.userState?.isLinked) {
+      await ctx.reply('❌ Please link your API credentials first using /link');
+      return;
+    }
+
+    const apiClient = this.userSessions.get(ctx.from!.id);
+    if (!apiClient) {
+      await ctx.reply('❌ API session not found. Please try linking your credentials again.');
+      return;
+    }
+
+    try {
+      switch (action) {
+        case 'manage':
+          await this.showPositionManagementMenu(ctx, symbol, apiClient);
+          break;
+        case 'close':
+          await this.handleClosePosition(ctx, symbol, apiClient);
+          break;
+        case 'close_25':
+          await this.handleClosePositionPercentage(ctx, symbol, apiClient, 25);
+          break;
+        case 'close_50':
+          await this.handleClosePositionPercentage(ctx, symbol, apiClient, 50);
+          break;
+        case 'close_75':
+          await this.handleClosePositionPercentage(ctx, symbol, apiClient, 75);
+          break;
+        case 'set_sl':
+          await this.handleSetStopLoss(ctx, symbol, apiClient);
+          break;
+        case 'set_tp':
+          await this.handleSetTakeProfit(ctx, symbol, apiClient);
+          break;
+        case 'add_margin':
+          await this.handleAddMargin(ctx, symbol, apiClient);
+          break;
+        case 'reduce_margin':
+          await this.handleReduceMargin(ctx, symbol, apiClient);
+          break;
+        default:
+          await ctx.reply(`❌ Unknown position action: ${action}`);
+      }
+    } catch (error: any) {
+      console.error(`Position action error for ${symbol}:`, error);
+      await ctx.reply(`❌ Failed to ${action} position for ${symbol}: ${error.message}`);
+    }
+  }
+
+  private async showPositionManagementMenu(ctx: BotContext, symbol: string, apiClient: AsterApiClient): Promise<void> {
+    try {
+      const positions = await apiClient.getPositionRisk();
+      const position = positions.find(p => p.symbol === symbol && parseFloat(p.positionAmt) !== 0);
+      
+      if (!position) {
+        await ctx.reply(`❌ No open position found for ${symbol}`);
+        return;
+      }
+
+      const positionAmt = parseFloat(position.positionAmt);
+      const side = positionAmt > 0 ? 'LONG' : 'SHORT';
+      const pnl = parseFloat(position.unrealizedPnl);
+      const pnlEmoji = pnl >= 0 ? '🟢' : '🔴';
+      
+      const positionText = [
+        `📊 **${symbol} Position Management**`,
+        '',
+        `**Side:** ${side}`,
+        `**Size:** ${Math.abs(positionAmt)}`,
+        `**Entry Price:** $${position.entryPrice}`,
+        `**Leverage:** ${position.leverage}x`,
+        `**${pnlEmoji} P&L:** $${pnl.toFixed(2)}`,
+        '',
+        'Choose an action:',
+      ].join('\n');
+
+      const keyboard = Markup.inlineKeyboard([
+        [
+          Markup.button.callback('🔴 Close 25%', `position_close_25_${symbol}`),
+          Markup.button.callback('🔴 Close 50%', `position_close_50_${symbol}`)
+        ],
+        [
+          Markup.button.callback('🔴 Close 75%', `position_close_75_${symbol}`),
+          Markup.button.callback('🔴 Close 100%', `position_close_${symbol}`)
+        ],
+        [
+          Markup.button.callback('🛡️ Set Stop Loss', `position_set_sl_${symbol}`),
+          Markup.button.callback('🎯 Set Take Profit', `position_set_tp_${symbol}`)
+        ],
+        [
+          Markup.button.callback('➕ Add Margin', `position_add_margin_${symbol}`),
+          Markup.button.callback('➖ Reduce Margin', `position_reduce_margin_${symbol}`)
+        ],
+        [
+          Markup.button.callback('🔙 Back to Positions', 'positions')
+        ]
+      ]);
+
+      await ctx.editMessageText(positionText, { parse_mode: 'Markdown', ...keyboard });
+      
+    } catch (error: any) {
+      console.error('Position management menu error:', error);
+      await ctx.reply(`❌ Failed to load position details for ${symbol}: ${error.message}`);
+    }
+  }
+
+  private async handleClosePosition(ctx: BotContext, symbol: string, apiClient: AsterApiClient): Promise<void> {
+    try {
+      const result = await apiClient.closePosition(symbol, 100);
+      await ctx.reply(`✅ Successfully closed position for ${symbol}\nOrder ID: ${result.orderId}`);
+    } catch (error: any) {
+      throw new Error(`Failed to close position: ${error.message}`);
+    }
+  }
+
+  private async handleClosePositionPercentage(ctx: BotContext, symbol: string, apiClient: AsterApiClient, percentage: number): Promise<void> {
+    try {
+      const result = await apiClient.closePosition(symbol, percentage);
+      await ctx.reply(`✅ Successfully closed ${percentage}% of ${symbol} position\nOrder ID: ${result.orderId}`);
+    } catch (error: any) {
+      throw new Error(`Failed to close ${percentage}% of position: ${error.message}`);
+    }
+  }
+
+  private async handleSetStopLoss(ctx: BotContext, symbol: string, apiClient: AsterApiClient): Promise<void> {
+    // Set conversation state to expect stop loss price input
+    this.conversationStates.set(ctx.from!.id, {
+      type: 'expecting_stop_loss',
+      symbol,
+      step: 'price'
+    });
+    
+    await ctx.reply(`🛡️ Please enter the stop loss price for ${symbol}:\n(Enter price like: 45000 or 0.025)`);
+  }
+
+  private async handleSetTakeProfit(ctx: BotContext, symbol: string, apiClient: AsterApiClient): Promise<void> {
+    // Set conversation state to expect take profit price input
+    this.conversationStates.set(ctx.from!.id, {
+      type: 'expecting_take_profit',
+      symbol,
+      step: 'price'
+    });
+    
+    await ctx.reply(`🎯 Please enter the take profit price for ${symbol}:\n(Enter price like: 50000 or 0.030)`);
+  }
+
+  private async handleAddMargin(ctx: BotContext, symbol: string, apiClient: AsterApiClient): Promise<void> {
+    // Set conversation state to expect margin amount input
+    this.conversationStates.set(ctx.from!.id, {
+      type: 'expecting_margin',
+      symbol,
+      step: 'amount',
+      marginType: 'add'
+    });
+    
+    await ctx.reply(`➕ Please enter the margin amount to add for ${symbol}:\n(Enter amount like: 100 or 50.5)`);
+  }
+
+  private async handleReduceMargin(ctx: BotContext, symbol: string, apiClient: AsterApiClient): Promise<void> {
+    // Set conversation state to expect margin amount input
+    this.conversationStates.set(ctx.from!.id, {
+      type: 'expecting_margin',
+      symbol,
+      step: 'amount',
+      marginType: 'reduce'
+    });
+    
+    await ctx.reply(`➖ Please enter the margin amount to reduce for ${symbol}:\n(Enter amount like: 100 or 50.5)`);
+  }
+
+  private async showQuickTradingPanel(ctx: BotContext, symbol: string): Promise<void> {
+    try {
+      // Get current position info
+      const apiClient = this.userSessions.get(ctx.from!.id);
+      if (!apiClient) {
+        await ctx.reply('❌ API session not found. Please try linking your credentials again.');
+        return;
+      }
+
+      const positions = await apiClient.getPositionRisk();
+      const position = positions.find(p => p.symbol === symbol);
+      const currentPrice = await this.getCurrentPrice(symbol);
+      
+      let positionInfo = '';
+      if (position && parseFloat(position.positionAmt) !== 0) {
+        const side = parseFloat(position.positionAmt) > 0 ? 'LONG' : 'SHORT';
+        const size = Math.abs(parseFloat(position.positionAmt));
+        const pnl = parseFloat(position.unrealizedPnl);
+        const pnlEmoji = pnl >= 0 ? '🟢' : '🔴';
+        
+        positionInfo = [
+          `**Current Position:** ${side} ${size} @ $${position.entryPrice}`,
+          `${pnlEmoji} **P&L:** ${pnl >= 0 ? '+' : ''}$${pnl.toFixed(2)}`,
+          ''
+        ].join('\n');
+      }
+
+      const quickTradeText = [
+        `⚡ **Quick Trade: ${symbol}**`,
+        `📈 **Current Price:** $${currentPrice.toFixed(4)}`,
+        '',
+        positionInfo,
+        '🎯 **Quick Actions:**'
+      ].join('\n');
+
+      const keyboard = Markup.inlineKeyboard([
+        [
+          Markup.button.callback('🟢 Buy 25u', `quick_buy_25u_${symbol}`),
+          Markup.button.callback('🟢 Buy 50u', `quick_buy_50u_${symbol}`),
+          Markup.button.callback('🟢 Buy 100u', `quick_buy_100u_${symbol}`)
+        ],
+        [
+          Markup.button.callback('🔴 Sell 25%', `quick_sell_25p_${symbol}`),
+          Markup.button.callback('🔴 Sell 50%', `quick_sell_50p_${symbol}`),
+          Markup.button.callback('🔴 Sell 100%', `quick_sell_100p_${symbol}`)
+        ],
+        [
+          Markup.button.callback('📊 Manage Position', `position_manage_${symbol}`),
+          Markup.button.callback('📈 Advanced Trade', `trade_interface`)
+        ],
+        [
+          Markup.button.callback('🔙 Back to Positions', 'positions')
+        ]
+      ]);
+
+      await ctx.editMessageText(quickTradeText, { parse_mode: 'Markdown', ...keyboard });
+
+    } catch (error) {
+      console.error('Quick trading panel error:', error);
+      await ctx.reply(`❌ Failed to load trading panel for ${symbol}`);
+    }
+  }
+
+  private async handleQuickTrade(ctx: BotContext, side: string, amount: number, unit: string, symbol: string): Promise<void> {
+    if (!ctx.userState?.isLinked) {
+      await ctx.reply('❌ Please link your API credentials first using /link');
+      return;
+    }
+
+    const apiClient = this.userSessions.get(ctx.from!.id);
+    if (!apiClient) {
+      await ctx.reply('❌ API session not found. Please try linking your credentials again.');
+      return;
+    }
+
+    try {
+      let orderParams: Partial<NewOrderRequest>;
+
+      if (unit === 'u') {
+        // Buy with USDT amount
+        const currentPrice = await this.getCurrentPrice(symbol);
+        const quantity = (amount / currentPrice).toString();
+        
+        orderParams = {
+          symbol,
+          side: side.toUpperCase() as 'BUY' | 'SELL',
+          type: 'MARKET',
+          quantity
+        };
+      } else if (unit === 'p' && side === 'sell') {
+        // Sell percentage of position
+        const positions = await apiClient.getPositionRisk();
+        const position = positions.find(p => p.symbol === symbol && parseFloat(p.positionAmt) !== 0);
+        
+        if (!position) {
+          await ctx.reply(`❌ No open position found for ${symbol}`);
+          return;
+        }
+
+        const positionSize = Math.abs(parseFloat(position.positionAmt));
+        const sellQuantity = (positionSize * amount / 100);
+        
+        orderParams = {
+          symbol,
+          side: parseFloat(position.positionAmt) > 0 ? 'SELL' : 'BUY',
+          type: 'MARKET',
+          quantity: sellQuantity.toString(),
+          reduceOnly: true
+        };
+      } else {
+        await ctx.reply('❌ Invalid trade parameters');
+        return;
+      }
+
+      // Execute the order
+      await ctx.reply(`🔄 Executing ${side} order for ${symbol}...`);
+      const result = await apiClient.createOrder(orderParams);
+      
+      const successMessage = [
+        `✅ **Quick ${side.toUpperCase()} Executed**`,
+        `**Symbol:** ${symbol}`,
+        `**Order ID:** ${result.orderId}`,
+        `**Quantity:** ${result.executedQty}`,
+        result.avgPrice ? `**Avg Price:** $${result.avgPrice}` : '',
+        result.cumQuote ? `**Total:** $${parseFloat(result.cumQuote).toFixed(2)}` : ''
+      ].filter(Boolean).join('\n');
+
+      await ctx.reply(successMessage, { parse_mode: 'Markdown' });
+
+    } catch (error: any) {
+      console.error('Quick trade error:', error);
+      await ctx.reply(`❌ Quick ${side} failed for ${symbol}: ${error.message}`);
+    }
+  }
+
+  private async getCurrentPrice(symbol: string): Promise<number> {
+    try {
+      const apiClient = Array.from(this.userSessions.values())[0]; // Use any connected client for public data
+      if (!apiClient) {
+        throw new Error('No API client available');
+      }
+      
+      const ticker = await apiClient.get24hrTicker(symbol);
+      return parseFloat(ticker.lastPrice);
+    } catch (error) {
+      console.warn(`Failed to get current price for ${symbol}:`, error);
+      return 0;
+    }
+  }
+
+  private async handleSpotCommand(ctx: BotContext): Promise<void> {
+    if (!ctx.userState?.isLinked) {
+      await ctx.reply('❌ Please link your API credentials first using /link');
+      return;
+    }
+
+    const apiClient = this.userSessions.get(ctx.from!.id);
+    if (!apiClient) {
+      await ctx.reply('❌ API session not found. Please try linking your credentials again.');
+      return;
+    }
+
+    const messageText = ctx.message && 'text' in ctx.message ? ctx.message.text : '';
+    const args = messageText.split(' ').slice(1); // Remove '/spot'
+    
+    if (args.length < 3) {
+      await ctx.reply(`❌ Invalid spot command format.
+      
+**Usage:**
+• \`/spot buy BTCUSDT 100u\` - Market buy with USDT
+• \`/spot sell BTCUSDT 0.5\` - Market sell quantity
+• \`/spot limit buy BTCUSDT 0.1 67000\` - Limit buy
+• \`/spot limit sell BTCUSDT 0.1 68000\` - Limit sell`);
+      return;
+    }
+
+    try {
+      const [action, symbol, quantityOrAmount, price] = args;
+      
+      if (action === 'limit') {
+        // Handle limit orders: /spot limit buy BTCUSDT 0.1 67000
+        if (args.length < 5) {
+          await ctx.reply('❌ Limit order requires: `/spot limit buy/sell SYMBOL QUANTITY PRICE`');
+          return;
+        }
+        
+        const [, side, sym, qty, limitPrice] = args;
+        await this.executeSpotLimitOrder(ctx, apiClient, sym.toUpperCase(), side, qty, limitPrice);
+      } else {
+        // Handle market orders: /spot buy BTCUSDT 100u
+        await this.executeSpotMarketOrder(ctx, apiClient, symbol.toUpperCase(), action, quantityOrAmount);
+      }
+
+    } catch (error: any) {
+      console.error('Spot command error:', error);
+      await ctx.reply(`❌ Spot trade failed: ${error.message}`);
+    }
+  }
+
+  private async executeSpotMarketOrder(ctx: BotContext, apiClient: AsterApiClient, symbol: string, side: string, quantityOrAmount: string): Promise<void> {
+    const isBuy = side.toLowerCase() === 'buy';
+    const isQuoteOrder = quantityOrAmount.endsWith('u') || quantityOrAmount.includes('usdt');
+    
+    let orderParams: any = {
+      symbol,
+      side: isBuy ? 'BUY' : 'SELL',
+      type: 'MARKET'
+    };
+
+    if (isQuoteOrder) {
+      // Quote order (e.g., 100u = $100 worth)
+      const amount = parseFloat(quantityOrAmount.replace(/[u$usdt]/gi, ''));
+      orderParams.quoteOrderQty = amount.toString();
+    } else {
+      // Base quantity order (e.g., 0.5 = 0.5 BTC)
+      orderParams.quantity = quantityOrAmount;
+    }
+
+    await ctx.reply(`🔄 Executing spot ${side} order for ${symbol}...`);
+    
+    const result = await apiClient.createSpotOrder(orderParams);
+    
+    const successMessage = [
+      `✅ **Spot ${side.toUpperCase()} Executed**`,
+      `**Symbol:** ${symbol}`,
+      `**Order ID:** ${result.orderId}`,
+      `**Status:** ${result.status}`,
+      result.executedQty ? `**Executed Qty:** ${result.executedQty}` : '',
+      result.cummulativeQuoteQty ? `**Total:** $${parseFloat(result.cummulativeQuoteQty).toFixed(2)}` : '',
+      result.fills && result.fills.length > 0 ? `**Avg Price:** $${this.calculateAvgPrice(result.fills)}` : ''
+    ].filter(Boolean).join('\n');
+
+    await ctx.reply(successMessage, { parse_mode: 'Markdown' });
+  }
+
+  private async executeSpotLimitOrder(ctx: BotContext, apiClient: AsterApiClient, symbol: string, side: string, quantity: string, price: string): Promise<void> {
+    const orderParams = {
+      symbol,
+      side: side.toUpperCase() as 'BUY' | 'SELL',
+      type: 'LIMIT' as const,
+      quantity,
+      price,
+      timeInForce: 'GTC' as const
+    };
+
+    await ctx.reply(`🔄 Placing spot limit ${side} order for ${symbol}...`);
+    
+    const result = await apiClient.createSpotOrder(orderParams);
+    
+    const successMessage = [
+      `✅ **Spot Limit ${side.toUpperCase()} Placed**`,
+      `**Symbol:** ${symbol}`,
+      `**Order ID:** ${result.orderId}`,
+      `**Quantity:** ${quantity}`,
+      `**Limit Price:** $${price}`,
+      `**Status:** ${result.status}`,
+      `**Total Value:** $${(parseFloat(quantity) * parseFloat(price)).toFixed(2)}`
+    ].join('\n');
+
+    await ctx.reply(successMessage, { parse_mode: 'Markdown' });
+  }
+
+  private calculateAvgPrice(fills: any[]): string {
+    if (!fills || fills.length === 0) return '0.0000';
+    
+    let totalQty = 0;
+    let totalValue = 0;
+    
+    for (const fill of fills) {
+      const qty = parseFloat(fill.qty);
+      const price = parseFloat(fill.price);
+      totalQty += qty;
+      totalValue += qty * price;
+    }
+    
+    return totalQty > 0 ? (totalValue / totalQty).toFixed(4) : '0.0000';
   }
 
   // === BUTTON-BASED TRADING INTERFACE ===

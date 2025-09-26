@@ -270,6 +270,89 @@ export class AsterApiClient {
     return response.data;
   }
 
+  async closePosition(symbol: string, percentage: number = 100): Promise<OrderResponse> {
+    const positions = await this.getPositionRisk();
+    const position = positions.find(p => p.symbol === symbol && parseFloat(p.positionAmt) !== 0);
+    
+    if (!position) {
+      throw new Error(`No open position found for ${symbol}`);
+    }
+
+    const positionAmt = Math.abs(parseFloat(position.positionAmt));
+    const closeQuantity = (positionAmt * percentage / 100).toString();
+    const side = parseFloat(position.positionAmt) > 0 ? 'SELL' : 'BUY';
+
+    const orderParams: Partial<NewOrderRequest> = {
+      symbol,
+      side: side as any,
+      type: 'MARKET',
+      quantity: closeQuantity,
+      reduceOnly: true
+    };
+
+    return this.createOrder(orderParams);
+  }
+
+  async modifyPositionMargin(symbol: string, amount: number, type: 1 | 2 = 1): Promise<{ amount: number; code: number; msg: string; type: number }> {
+    const params = {
+      symbol,
+      amount: amount.toString(),
+      type: type.toString()
+    };
+
+    const signedRequest = AsterSigner.signPostRequest('/fapi/v1/positionMargin', params, this.apiSecret);
+    const response = await this.axios.post<{ amount: number; code: number; msg: string; type: number }>(signedRequest.url);
+    return response.data;
+  }
+
+  async setStopLoss(symbol: string, stopPrice: number, percentage?: number): Promise<OrderResponse> {
+    const positions = await this.getPositionRisk();
+    const position = positions.find(p => p.symbol === symbol && parseFloat(p.positionAmt) !== 0);
+    
+    if (!position) {
+      throw new Error(`No open position found for ${symbol}`);
+    }
+
+    const positionAmt = Math.abs(parseFloat(position.positionAmt));
+    const quantity = percentage ? (positionAmt * percentage / 100).toString() : position.positionAmt;
+    const side = parseFloat(position.positionAmt) > 0 ? 'SELL' : 'BUY';
+
+    const orderParams: Partial<NewOrderRequest> = {
+      symbol,
+      side: side as any,
+      type: 'STOP_MARKET',
+      quantity: Math.abs(parseFloat(quantity)).toString(),
+      stopPrice: stopPrice.toString(),
+      reduceOnly: true
+    };
+
+    return this.createOrder(orderParams);
+  }
+
+  async setTakeProfit(symbol: string, price: number, percentage?: number): Promise<OrderResponse> {
+    const positions = await this.getPositionRisk();
+    const position = positions.find(p => p.symbol === symbol && parseFloat(p.positionAmt) !== 0);
+    
+    if (!position) {
+      throw new Error(`No open position found for ${symbol}`);
+    }
+
+    const positionAmt = Math.abs(parseFloat(position.positionAmt));
+    const quantity = percentage ? (positionAmt * percentage / 100).toString() : position.positionAmt;
+    const side = parseFloat(position.positionAmt) > 0 ? 'SELL' : 'BUY';
+
+    const orderParams: Partial<NewOrderRequest> = {
+      symbol,
+      side: side as any,
+      type: 'TAKE_PROFIT_MARKET',
+      quantity: Math.abs(parseFloat(quantity)).toString(),
+      stopPrice: price.toString(),
+      reduceOnly: true
+    };
+
+    return this.createOrder(orderParams);
+  }
+
   async createListenKey(): Promise<{ listenKey: string }> {
     const response = await this.axios.post<{ listenKey: string }>('/fapi/v1/listenKey');
     return response.data;
@@ -283,6 +366,61 @@ export class AsterApiClient {
   async deleteListenKey(listenKey: string): Promise<void> {
     const signedRequest = AsterSigner.signDeleteRequest('/fapi/v1/listenKey', { listenKey }, this.apiSecret);
     await this.axios.delete(signedRequest.url);
+  }
+
+  async get24hrTicker(symbol: string): Promise<{ 
+    lastPrice: string; 
+    priceChangePercent: string;
+    highPrice: string;
+    lowPrice: string;
+    volume: string;
+  }> {
+    const response = await this.axios.get(`/fapi/v1/ticker/24hr?symbol=${symbol}`);
+    return response.data;
+  }
+
+  async getMyTrades(symbol: string, limit = 500): Promise<any[]> {
+    const params = { symbol, limit: limit.toString() };
+    const signedRequest = AsterSigner.signGetRequest('/api/v3/myTrades', params, this.apiSecret);
+    const response = await this.axios.get<any[]>(signedRequest.url);
+    return response.data;
+  }
+
+  async getIncomeHistory(params: {
+    symbol?: string;
+    incomeType?: 'TRANSFER' | 'WELCOME_BONUS' | 'REALIZED_PNL' | 'FUNDING_FEE' | 'COMMISSION' | 'INSURANCE_CLEAR';
+    startTime?: number;
+    endTime?: number;
+    limit?: number;
+  } = {}): Promise<any[]> {
+    const queryParams = {
+      ...params,
+      limit: params.limit?.toString() || '100'
+    };
+    const signedRequest = AsterSigner.signGetRequest('/fapi/v1/income', queryParams, this.apiSecret);
+    const response = await this.axios.get<any[]>(signedRequest.url);
+    return response.data;
+  }
+
+  async createSpotOrder(orderParams: {
+    symbol: string;
+    side: 'BUY' | 'SELL';
+    type: 'MARKET' | 'LIMIT' | 'STOP_LOSS' | 'STOP_LOSS_LIMIT' | 'TAKE_PROFIT' | 'TAKE_PROFIT_LIMIT';
+    quantity?: string;
+    quoteOrderQty?: string;
+    price?: string;
+    stopPrice?: string;
+    timeInForce?: 'GTC' | 'IOC' | 'FOK';
+  }): Promise<any> {
+    const signedRequest = AsterSigner.signPostRequest('/api/v3/order', orderParams, this.apiSecret);
+    const response = await this.axios.post(signedRequest.url);
+    return response.data;
+  }
+
+  async getSpotAccount(): Promise<{ balances: Array<{ asset: string; free: string; locked: string }> }> {
+    const signedRequest = AsterSigner.signGetRequest('/api/v3/account', {}, this.apiSecret);
+    const response = await this.axios.get<{ balances: Array<{ asset: string; free: string; locked: string }> }>(signedRequest.url);
+    return response.data;
   }
 
   async testConnectivity(): Promise<boolean> {
@@ -316,11 +454,6 @@ export class AsterApiClient {
     return response.data;
   }
 
-  async get24hrTicker(symbol?: string): Promise<any> {
-    const params = symbol ? { symbol } : {};
-    const response = await this.axios.get('/fapi/v1/ticker/24hr', { params });
-    return response.data;
-  }
 
   async getRecentTrades(symbol: string, limit = 500): Promise<Array<{
     id: number;

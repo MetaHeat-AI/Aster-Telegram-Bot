@@ -396,11 +396,14 @@ export interface UserState {
     isBlocked: boolean;
   };
   conversationState?: {
-    step: 'waiting_api_key' | 'waiting_api_secret' | 'waiting_pin' | 'confirming_unlink';
+    step: 'waiting_api_key' | 'waiting_api_secret' | 'waiting_pin' | 'confirming_unlink' | 'price' | 'amount';
     data?: {
       apiKey?: string;
       pendingAction?: 'link' | 'unlink';
     };
+    type?: 'expecting_stop_loss' | 'expecting_take_profit' | 'expecting_margin';
+    symbol?: string;
+    marginType?: 'add' | 'reduce';
   };
 }
 
