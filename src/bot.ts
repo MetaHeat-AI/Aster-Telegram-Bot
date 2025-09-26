@@ -674,14 +674,15 @@ Please send your **API Key** now:
       return;
     }
 
-    const apiClient = this.userSessions.get(ctx.from!.id);
+    const apiClient = this.getUserApiClient(ctx);
     if (!apiClient) {
       await ctx.reply('❌ API session not found. Please try linking your credentials again.');
       this.clearConversationState(ctx);
       return;
     }
 
-    const state = this.conversationStates.get(ctx.from!.id);
+    const userId = ctx.userState?.userId || ctx.from!.id;
+    const state = this.conversationStates.get(userId);
     if (!state || !state.symbol) {
       await ctx.reply('❌ Session expired. Please try again.');
       this.clearConversationState(ctx);
@@ -714,14 +715,15 @@ Please send your **API Key** now:
       return;
     }
 
-    const apiClient = this.userSessions.get(ctx.from!.id);
+    const apiClient = this.getUserApiClient(ctx);
     if (!apiClient) {
       await ctx.reply('❌ API session not found. Please try linking your credentials again.');
       this.clearConversationState(ctx);
       return;
     }
 
-    const state = this.conversationStates.get(ctx.from!.id);
+    const userId = ctx.userState?.userId || ctx.from!.id;
+    const state = this.conversationStates.get(userId);
     if (!state || !state.symbol || !state.marginType) {
       await ctx.reply('❌ Session expired. Please try again.');
       this.clearConversationState(ctx);
@@ -750,7 +752,22 @@ Please send your **API Key** now:
     if (ctx.userState) {
       ctx.userState.conversationState = undefined;
     }
-    this.conversationStates.delete(ctx.from!.id);
+    const userId = ctx.userState?.userId || ctx.from!.id;
+    this.conversationStates.delete(userId);
+  }
+
+  private getUserApiClient(ctx: BotContext): AsterApiClient | null {
+    // Try to get the API client using the correct user ID
+    if (ctx.userState?.userId) {
+      return this.userSessions.get(ctx.userState.userId) || null;
+    }
+    
+    // Fallback to ctx.from.id if userState is not available
+    if (ctx.from?.id) {
+      return this.userSessions.get(ctx.from.id) || null;
+    }
+    
+    return null;
   }
 
   private async handleTradePreview(ctx: BotContext, command: TradeCommand): Promise<void> {
@@ -989,7 +1006,7 @@ ${trade.maxSlippageExceeded ? '\n❌ **Max slippage exceeded**' : ''}
       return;
     }
 
-    const apiClient = this.userSessions.get(ctx.from!.id);
+    const apiClient = this.getUserApiClient(ctx);
     if (!apiClient) {
       await ctx.reply('❌ API session not found. Please try linking your credentials again.');
       return;
@@ -1048,7 +1065,7 @@ ${trade.maxSlippageExceeded ? '\n❌ **Max slippage exceeded**' : ''}
       
       openPositions.forEach(pos => {
         const side = parseFloat(pos.positionAmt) > 0 ? '🟢 LONG' : '🔴 SHORT';
-        const pnl = parseFloat(pos.unrealizedPnl);
+        const pnl = parseFloat(pos.unrealizedPnl) || 0;
         const pnlEmoji = pnl >= 0 ? '📈' : '📉';
         
         positionsText += [
@@ -1153,7 +1170,7 @@ ${trade.maxSlippageExceeded ? '\n❌ **Max slippage exceeded**' : ''}
       return;
     }
 
-    const apiClient = this.userSessions.get(ctx.from!.id);
+    const apiClient = this.getUserApiClient(ctx);
     if (!apiClient) {
       await ctx.reply('❌ API session not found. Please try linking your credentials again.');
       return;
@@ -1209,7 +1226,7 @@ ${trade.maxSlippageExceeded ? '\n❌ **Max slippage exceeded**' : ''}
 
       const positionAmt = parseFloat(position.positionAmt);
       const side = positionAmt > 0 ? 'LONG' : 'SHORT';
-      const pnl = parseFloat(position.unrealizedPnl);
+      const pnl = parseFloat(position.unrealizedPnl) || 0;
       const pnlEmoji = pnl >= 0 ? '🟢' : '🔴';
       
       const positionText = [
@@ -1274,7 +1291,8 @@ ${trade.maxSlippageExceeded ? '\n❌ **Max slippage exceeded**' : ''}
 
   private async handleSetStopLoss(ctx: BotContext, symbol: string, apiClient: AsterApiClient): Promise<void> {
     // Set conversation state to expect stop loss price input
-    this.conversationStates.set(ctx.from!.id, {
+    const userId = ctx.userState?.userId || ctx.from!.id;
+    this.conversationStates.set(userId, {
       type: 'expecting_stop_loss',
       symbol,
       step: 'price'
@@ -1285,7 +1303,8 @@ ${trade.maxSlippageExceeded ? '\n❌ **Max slippage exceeded**' : ''}
 
   private async handleSetTakeProfit(ctx: BotContext, symbol: string, apiClient: AsterApiClient): Promise<void> {
     // Set conversation state to expect take profit price input
-    this.conversationStates.set(ctx.from!.id, {
+    const userId = ctx.userState?.userId || ctx.from!.id;
+    this.conversationStates.set(userId, {
       type: 'expecting_take_profit',
       symbol,
       step: 'price'
@@ -1296,7 +1315,8 @@ ${trade.maxSlippageExceeded ? '\n❌ **Max slippage exceeded**' : ''}
 
   private async handleAddMargin(ctx: BotContext, symbol: string, apiClient: AsterApiClient): Promise<void> {
     // Set conversation state to expect margin amount input
-    this.conversationStates.set(ctx.from!.id, {
+    const userId = ctx.userState?.userId || ctx.from!.id;
+    this.conversationStates.set(userId, {
       type: 'expecting_margin',
       symbol,
       step: 'amount',
@@ -1308,7 +1328,8 @@ ${trade.maxSlippageExceeded ? '\n❌ **Max slippage exceeded**' : ''}
 
   private async handleReduceMargin(ctx: BotContext, symbol: string, apiClient: AsterApiClient): Promise<void> {
     // Set conversation state to expect margin amount input
-    this.conversationStates.set(ctx.from!.id, {
+    const userId = ctx.userState?.userId || ctx.from!.id;
+    this.conversationStates.set(userId, {
       type: 'expecting_margin',
       symbol,
       step: 'amount',
@@ -1321,7 +1342,7 @@ ${trade.maxSlippageExceeded ? '\n❌ **Max slippage exceeded**' : ''}
   private async showQuickTradingPanel(ctx: BotContext, symbol: string): Promise<void> {
     try {
       // Get current position info
-      const apiClient = this.userSessions.get(ctx.from!.id);
+      const apiClient = this.getUserApiClient(ctx);
       if (!apiClient) {
         await ctx.reply('❌ API session not found. Please try linking your credentials again.');
         return;
@@ -1335,7 +1356,7 @@ ${trade.maxSlippageExceeded ? '\n❌ **Max slippage exceeded**' : ''}
       if (position && parseFloat(position.positionAmt) !== 0) {
         const side = parseFloat(position.positionAmt) > 0 ? 'LONG' : 'SHORT';
         const size = Math.abs(parseFloat(position.positionAmt));
-        const pnl = parseFloat(position.unrealizedPnl);
+        const pnl = parseFloat(position.unrealizedPnl) || 0;
         const pnlEmoji = pnl >= 0 ? '🟢' : '🔴';
         
         positionInfo = [
@@ -1387,7 +1408,7 @@ ${trade.maxSlippageExceeded ? '\n❌ **Max slippage exceeded**' : ''}
       return;
     }
 
-    const apiClient = this.userSessions.get(ctx.from!.id);
+    const apiClient = this.getUserApiClient(ctx);
     if (!apiClient) {
       await ctx.reply('❌ API session not found. Please try linking your credentials again.');
       return;
@@ -1474,7 +1495,7 @@ ${trade.maxSlippageExceeded ? '\n❌ **Max slippage exceeded**' : ''}
       return;
     }
 
-    const apiClient = this.userSessions.get(ctx.from!.id);
+    const apiClient = this.getUserApiClient(ctx);
     if (!apiClient) {
       await ctx.reply('❌ API session not found. Please try linking your credentials again.');
       return;
