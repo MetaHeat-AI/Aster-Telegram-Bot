@@ -1730,22 +1730,60 @@ ${trade.maxSlippageExceeded ? '\n❌ **Max slippage exceeded**' : ''}
 
     try {
       const apiClient = await this.getOrCreateApiClient(ctx.userState.userId);
-      const account = await apiClient.getAccountInfo();
       
-      const balanceText = [
-        '💰 **Account Balance**',
-        '',
-        `💵 Total Wallet Balance: $${parseFloat(account.totalWalletBalance).toFixed(2)}`,
-        `📊 Total Margin Balance: $${parseFloat(account.totalMarginBalance).toFixed(2)}`,
-        `✅ Available Balance: $${parseFloat(account.availableBalance).toFixed(2)}`,
-        `📈 Unrealized PnL: $${parseFloat(account.totalUnrealizedPnl).toFixed(2)}`,
-        '',
-        `🏦 **Margin Info**`,
-        `• Position Margin: $${parseFloat(account.totalPositionInitialMargin).toFixed(2)}`,
-        `• Order Margin: $${parseFloat(account.totalOpenOrderInitialMargin).toFixed(2)}`,
-      ].join('\n');
+      // Get both spot and futures balances
+      const [spotAccount, futuresAccount] = await Promise.all([
+        apiClient.getSpotAccount().catch(() => null),
+        apiClient.getAccountInfo().catch(() => null)
+      ]);
+      
+      let balanceText = ['💰 **Account Balances**', ''];
+      
+      // Spot Balance Section
+      if (spotAccount && spotAccount.balances) {
+        balanceText.push('🏪 **Spot Trading**');
+        
+        // Filter and show only balances > 0
+        const significantBalances = spotAccount.balances
+          .filter((balance: any) => parseFloat(balance.free) > 0 || parseFloat(balance.locked) > 0)
+          .slice(0, 10); // Limit to top 10 to avoid message length issues
+        
+        if (significantBalances.length > 0) {
+          significantBalances.forEach((balance: any) => {
+            const free = parseFloat(balance.free);
+            const locked = parseFloat(balance.locked);
+            const total = free + locked;
+            
+            if (total > 0.001) { // Only show if > 0.001
+              balanceText.push(`• ${balance.asset}: ${total.toFixed(6)} (Free: ${free.toFixed(6)})`);
+            }
+          });
+        } else {
+          balanceText.push('• No significant spot balances');
+        }
+        
+        balanceText.push('');
+      }
+      
+      // Futures Balance Section
+      if (futuresAccount) {
+        balanceText.push('⚡ **Futures Trading**');
+        balanceText.push(`💵 Total Wallet Balance: $${parseFloat(futuresAccount.totalWalletBalance).toFixed(2)}`);
+        balanceText.push(`📊 Total Margin Balance: $${parseFloat(futuresAccount.totalMarginBalance).toFixed(2)}`);
+        balanceText.push(`✅ Available Balance: $${parseFloat(futuresAccount.availableBalance).toFixed(2)}`);
+        balanceText.push(`📈 Unrealized PnL: $${parseFloat(futuresAccount.totalUnrealizedPnl).toFixed(2)}`);
+        balanceText.push('');
+        balanceText.push(`🏦 **Margin Info**`);
+        balanceText.push(`• Position Margin: $${parseFloat(futuresAccount.totalPositionInitialMargin).toFixed(2)}`);
+        balanceText.push(`• Order Margin: $${parseFloat(futuresAccount.totalOpenOrderInitialMargin).toFixed(2)}`);
+      }
+      
+      // If both failed
+      if (!spotAccount && !futuresAccount) {
+        throw new Error('Failed to fetch both spot and futures balances');
+      }
 
-      await ctx.reply(balanceText, { parse_mode: 'Markdown' });
+      await ctx.reply(balanceText.join('\n'), { parse_mode: 'Markdown' });
 
     } catch (error) {
       console.error('Balance command error:', error);
