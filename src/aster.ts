@@ -412,6 +412,19 @@ export class AsterApiClient {
     stopPrice?: string;
     timeInForce?: 'GTC' | 'IOC' | 'FOK';
   }): Promise<any> {
+    // Validate symbol exists on spot exchange
+    const isValidSymbol = await this.validateSpotSymbol(orderParams.symbol);
+    if (!isValidSymbol) {
+      // Get available symbols for better error message
+      try {
+        const exchangeInfo = await this.getSpotExchangeInfo();
+        const availableSymbols = exchangeInfo.symbols?.map((s: any) => s.symbol).slice(0, 10) || [];
+        throw new Error(`Symbol ${orderParams.symbol} is not available for spot trading. Available symbols include: ${availableSymbols.join(', ')}...`);
+      } catch (error) {
+        throw new Error(`Symbol ${orderParams.symbol} is not available for spot trading. Please check the symbol or use futures trading instead.`);
+      }
+    }
+    
     // Use spot API base URL and endpoint
     const spotBaseUrl = 'https://sapi.asterdex.com';
     
@@ -454,6 +467,37 @@ export class AsterApiClient {
     // For GET requests, the signed parameters are in the URL
     const response = await spotAxios.get<{ balances: Array<{ asset: string; free: string; locked: string }> }>(`/api/v1/account?${signedRequest.url.split('?')[1]}`);
     return response.data;
+  }
+
+  async getSpotExchangeInfo(): Promise<any> {
+    // Get spot exchange info to validate symbols
+    const spotBaseUrl = 'https://sapi.asterdex.com';
+    const spotAxios = axios.create({ 
+      baseURL: spotBaseUrl,
+      headers: {
+        'X-MBX-APIKEY': this.apiKey,
+        'Content-Type': 'application/json'
+      }
+    });
+    
+    try {
+      const response = await spotAxios.get('/api/v1/exchangeInfo');
+      return response.data;
+    } catch (error) {
+      console.error('[SPOT API] Failed to get exchange info:', error);
+      throw error;
+    }
+  }
+
+  async validateSpotSymbol(symbol: string): Promise<boolean> {
+    try {
+      const exchangeInfo = await this.getSpotExchangeInfo();
+      const symbols = exchangeInfo.symbols || [];
+      return symbols.some((s: any) => s.symbol === symbol && s.status === 'TRADING');
+    } catch (error) {
+      console.error(`[SPOT API] Symbol validation failed for ${symbol}:`, error);
+      return false;
+    }
   }
 
   async testConnectivity(): Promise<boolean> {
