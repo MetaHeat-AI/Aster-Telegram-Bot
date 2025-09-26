@@ -194,6 +194,22 @@ export class DatabaseManager {
         CREATE INDEX IF NOT EXISTS idx_daily_loss_user_date ON daily_loss_tracking(user_id, date);
       `);
 
+      // Create conversation_states table
+      await client.query(`
+        CREATE TABLE IF NOT EXISTS conversation_states (
+          id SERIAL PRIMARY KEY,
+          user_id INTEGER REFERENCES users(id) ON DELETE CASCADE UNIQUE,
+          step VARCHAR(50) NOT NULL,
+          data JSONB,
+          expires_at TIMESTAMP WITH TIME ZONE NOT NULL,
+          created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+          updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+        );
+        
+        CREATE INDEX IF NOT EXISTS idx_conversation_states_expires_at ON conversation_states(expires_at);
+        CREATE INDEX IF NOT EXISTS idx_conversation_states_user_id ON conversation_states(user_id);
+      `);
+
       await client.query('COMMIT');
       console.log('[DB] Database schema initialized successfully');
       
@@ -481,6 +497,66 @@ export class DatabaseManager {
       return;
     }
     await this.redis.setEx(key, ttlSeconds, 'processed');
+  }
+
+  // ========== Conversation State Management ==========
+
+  async setConversationState(
+    userId: number, 
+    state: { step: string; data?: any; type?: string; symbol?: string; marginType?: string }, 
+    ttlMinutes = 5
+  ): Promise<void> {
+    const expiresAt = new Date(Date.now() + ttlMinutes * 60 * 1000);
+    
+    const query = `
+      INSERT INTO conversation_states (user_id, step, data, expires_at, updated_at)
+      VALUES ($1, $2, $3, $4, NOW())
+      ON CONFLICT (user_id) 
+      DO UPDATE SET 
+        step = EXCLUDED.step,
+        data = EXCLUDED.data,
+        expires_at = EXCLUDED.expires_at,
+        updated_at = NOW()
+    `;
+    
+    await this.pool.query(query, [
+      userId,
+      state.step,
+      JSON.stringify(state.data || {}),
+      expiresAt
+    ]);
+  }
+
+  async getConversationState(userId: number): Promise<any> {
+    const query = `
+      SELECT step, data, expires_at
+      FROM conversation_states 
+      WHERE user_id = $1 AND expires_at > NOW()
+    `;
+    
+    const result = await this.pool.query(query, [userId]);
+    
+    if (result.rows.length === 0) {
+      return undefined;
+    }
+    
+    const row = result.rows[0];
+    return {
+      step: row.step,
+      data: row.data || {},
+      expiresAt: row.expires_at
+    };
+  }
+
+  async deleteConversationState(userId: number): Promise<void> {
+    const query = 'DELETE FROM conversation_states WHERE user_id = $1';
+    await this.pool.query(query, [userId]);
+  }
+
+  async cleanupExpiredConversationStates(): Promise<number> {
+    const query = 'DELETE FROM conversation_states WHERE expires_at < NOW()';
+    const result = await this.pool.query(query);
+    return result.rowCount || 0;
   }
 
   // ========== Health Checks ==========

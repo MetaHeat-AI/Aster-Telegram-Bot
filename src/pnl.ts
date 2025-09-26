@@ -122,61 +122,64 @@ export class PnLCalculator {
       const allAssets = [...portfolioSummary.mainAssets, ...portfolioSummary.smallBalances];
 
       // For spot trading, we need to calculate cost basis vs current value
-      for (const balance of allAssets) {
-        if (balance.asset === 'USDT') continue;
+      // Process all assets in parallel
+      const positionPromises = allAssets
+        .filter(balance => balance.asset !== 'USDT')
+        .map(async (balance) => {
+          const symbol = `${balance.asset}USDT`;
+          
+          try {
+            // Get trades for this symbol to calculate cost basis
+            const trades = await this.apiClient.getMyTrades(symbol);
+            const validTrades = trades.filter(t => t.qty && t.price);
 
-        const symbol = `${balance.asset}USDT`;
-        
-        try {
-          // Get trades for this symbol to calculate cost basis
-          const trades = await this.apiClient.getMyTrades(symbol);
-          const validTrades = trades.filter(t => t.qty && t.price);
+            let totalCostBasis = 0;
+            let weightedAvgPrice = 0;
 
-          let totalCostBasis = 0;
-          let weightedAvgPrice = 0;
+            if (validTrades.length > 0) {
+              // Calculate weighted average cost using FIFO
+              const { remainingCostBasis, weightedAvgPrice: avgPrice } = 
+                this.calculateWeightedAverage(validTrades, balance.total);
+              
+              totalCostBasis = remainingCostBasis;
+              weightedAvgPrice = avgPrice;
+            } else {
+              // If no trades found, use current value as cost basis (external transfer)
+              totalCostBasis = balance.usdValue || 0;
+              weightedAvgPrice = totalCostBasis / balance.total;
+            }
 
-          if (validTrades.length > 0) {
-            // Calculate weighted average cost using FIFO
-            const { remainingCostBasis, weightedAvgPrice: avgPrice } = 
-              this.calculateWeightedAverage(validTrades, balance.total);
-            
-            totalCostBasis = remainingCostBasis;
-            weightedAvgPrice = avgPrice;
-          } else {
-            // If no trades found, use current value as cost basis (external transfer)
-            totalCostBasis = balance.usdValue || 0;
-            weightedAvgPrice = totalCostBasis / balance.total;
+            const currentValue = balance.usdValue || 0;
+            const unrealizedPnl = currentValue - totalCostBasis;
+
+            return {
+              asset: balance.asset,
+              quantity: balance.total,
+              totalCost: totalCostBasis,
+              avgPrice: weightedAvgPrice,
+              trades: validTrades,
+              unrealizedPnl,
+              currentValue,
+              pnlPercent: totalCostBasis > 0 ? (unrealizedPnl / totalCostBasis * 100) : 0
+            };
+
+          } catch (error) {
+            console.warn(`Failed to process ${symbol}:`, error);
+            // Still add the position with zero cost basis
+            return {
+              asset: balance.asset,
+              quantity: balance.total,
+              totalCost: 0,
+              avgPrice: 0,
+              trades: [],
+              unrealizedPnl: balance.usdValue || 0,
+              currentValue: balance.usdValue || 0,
+              pnlPercent: 0
+            };
           }
+        });
 
-          const currentValue = balance.usdValue || 0;
-          const unrealizedPnl = currentValue - totalCostBasis;
-
-          positions.push({
-            asset: balance.asset,
-            quantity: balance.total,
-            totalCost: totalCostBasis,
-            avgPrice: weightedAvgPrice,
-            trades: validTrades,
-            unrealizedPnl,
-            currentValue,
-            pnlPercent: totalCostBasis > 0 ? (unrealizedPnl / totalCostBasis * 100) : 0
-          });
-
-        } catch (error) {
-          console.warn(`Failed to process ${symbol}:`, error);
-          // Still add the position with zero cost basis
-          positions.push({
-            asset: balance.asset,
-            quantity: balance.total,
-            totalCost: 0,
-            avgPrice: 0,
-            trades: [],
-            unrealizedPnl: balance.usdValue || 0,
-            currentValue: balance.usdValue || 0,
-            pnlPercent: 0
-          });
-        }
-      }
+      positions.push(...await Promise.all(positionPromises));
 
       // Calculate totals
       const totalCostBasis = positions.reduce((sum, p) => sum + p.totalCost, 0);

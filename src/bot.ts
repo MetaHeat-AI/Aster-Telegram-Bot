@@ -38,7 +38,6 @@ class AsterTradingBot {
   
   private userSessions = new Map<number, AsterApiClient>();
   private pendingTrades = new Map<number, any>();
-  private conversationStates = new Map<number, UserState['conversationState']>();
   private symbolServices = new Map<number, SymbolService>();
   private spotAccountServices = new Map<number, SpotAccountService>();
   private futuresAccountServices = new Map<number, FuturesAccountService>();
@@ -60,6 +59,7 @@ class AsterTradingBot {
     this.setupCommands();
     this.setupActions();
     this.setupServer();
+    this.setupCleanupScheduler();
   }
 
   private async initializeExchangeInfo(): Promise<void> {
@@ -134,7 +134,7 @@ class AsterTradingBot {
           telegramId: ctx.from.id,
           isLinked: !!credentials,
           settings,
-          conversationState: this.conversationStates.get(user.id), // Get from memory store
+          conversationState: await this.db.getConversationState(user.id), // Get from database
         };
       } catch (error) {
         console.error('Middleware error:', error);
@@ -563,6 +563,36 @@ Choose an action below to get started:
     });
   }
 
+  private setupCleanupScheduler(): void {
+    // Clean up expired conversation states every 10 minutes
+    setInterval(async () => {
+      try {
+        const deletedCount = await this.db.cleanupExpiredConversationStates();
+        if (deletedCount > 0) {
+          console.log(`[Cleanup] Removed ${deletedCount} expired conversation states`);
+        }
+      } catch (error) {
+        console.error('[Cleanup] Failed to clean up conversation states:', error);
+      }
+    }, 10 * 60 * 1000); // 10 minutes
+
+    // Also clean up other expired items while we're at it
+    setInterval(async () => {
+      try {
+        const [expiredSessions, oldOrders] = await Promise.all([
+          this.db.cleanupExpiredSessions(),
+          this.db.cleanupOldOrders(7) // Remove orders older than 7 days
+        ]);
+        
+        if (expiredSessions > 0 || oldOrders > 0) {
+          console.log(`[Cleanup] Removed ${expiredSessions} expired sessions and ${oldOrders} old orders`);
+        }
+      } catch (error) {
+        console.error('[Cleanup] Failed to clean up sessions/orders:', error);
+      }
+    }, 60 * 60 * 1000); // 1 hour
+  }
+
   private async handleLinkFlow(ctx: BotContext): Promise<void> {
     if (!ctx.userState) return;
 
@@ -577,7 +607,7 @@ Choose an action below to get started:
       data: { pendingAction: 'link' as const }
     };
     ctx.userState.conversationState = conversationState;
-    this.conversationStates.set(ctx.userState.userId, conversationState);
+    await this.db.setConversationState(ctx.userState.userId, conversationState);
 
     await ctx.reply(`
 🔗 **Link Your Aster API Credentials**
@@ -628,13 +658,13 @@ Please send your **API Key** now:
         default:
           // Clear invalid state
           ctx.userState.conversationState = undefined;
-          this.conversationStates.delete(ctx.userState.userId);
+          await this.db.deleteConversationState(ctx.userState.userId);
           await ctx.reply('❌ Invalid conversation state. Please try again.');
       }
     } catch (error) {
       console.error('Conversation state error:', error);
       ctx.userState.conversationState = undefined;
-      this.conversationStates.delete(ctx.userState.userId);
+      await this.db.deleteConversationState(ctx.userState.userId);
       await ctx.reply('❌ An error occurred. Please try again.');
     }
   }
@@ -654,7 +684,7 @@ Please send your **API Key** now:
       data: { ...ctx.userState.conversationState.data, apiKey }
     };
     ctx.userState.conversationState = updatedState;
-    this.conversationStates.set(ctx.userState.userId, updatedState);
+    await this.db.setConversationState(ctx.userState.userId, updatedState);
 
     await ctx.reply(`✅ API Key received.\n\nNow please send your **API Secret**:`);
   }
@@ -680,7 +710,7 @@ Please send your **API Key** now:
       if (!isValid) {
         await ctx.reply('❌ Invalid API credentials. Please check your API key and secret and try again with /link');
         ctx.userState.conversationState = undefined;
-        this.conversationStates.delete(ctx.userState.userId);
+        await this.db.deleteConversationState(ctx.userState.userId);
         return;
       }
 
@@ -693,7 +723,7 @@ Please send your **API Key** now:
       // Update user state
       ctx.userState.isLinked = true;
       ctx.userState.conversationState = undefined;
-      this.conversationStates.delete(ctx.userState.userId);
+      await this.db.deleteConversationState(ctx.userState.userId);
       
       // Store API client in session
       this.userSessions.set(ctx.userState.userId, testClient);
@@ -703,7 +733,7 @@ Please send your **API Key** now:
     } catch (error) {
       console.error('API validation error:', error);
       ctx.userState.conversationState = undefined;
-      this.conversationStates.delete(ctx.userState.userId);
+      await this.db.deleteConversationState(ctx.userState.userId);
       await ctx.reply('❌ Failed to validate credentials. Please ensure they\'re correct and try again with /link');
     }
   }
@@ -713,7 +743,7 @@ Please send your **API Key** now:
     // For now, clear the conversation state
     if (ctx.userState) {
       ctx.userState.conversationState = undefined;
-      this.conversationStates.delete(ctx.userState.userId);
+      await this.db.deleteConversationState(ctx.userState.userId);
     }
     await ctx.reply('🔐 PIN functionality not yet implemented.');
   }
@@ -723,7 +753,7 @@ Please send your **API Key** now:
 
     const confirmation = response.toLowerCase().trim();
     ctx.userState.conversationState = undefined;
-    this.conversationStates.delete(ctx.userState.userId);
+    await this.db.deleteConversationState(ctx.userState.userId);
 
     if (confirmation === 'yes' || confirmation === 'y' || confirmation === 'confirm') {
       await this.performUnlink(ctx);
@@ -744,15 +774,15 @@ Please send your **API Key** now:
     const apiClient = this.getUserApiClient(ctx);
     if (!apiClient) {
       await ctx.reply('❌ API session not found. Please try linking your credentials again.');
-      this.clearConversationState(ctx);
+      await this.clearConversationState(ctx);
       return;
     }
 
     const userId = ctx.userState?.userId || ctx.from!.id;
-    const state = this.conversationStates.get(userId);
+    const state = await this.db.getConversationState(userId);
     if (!state || !state.symbol) {
       await ctx.reply('❌ Session expired. Please try again.');
-      this.clearConversationState(ctx);
+      await this.clearConversationState(ctx);
       return;
     }
 
@@ -770,7 +800,7 @@ Please send your **API Key** now:
       await ctx.reply(`❌ Failed to set ${state.type?.replace('expecting_', '').replace('_', ' ')}: ${error.message}`);
     }
 
-    this.clearConversationState(ctx);
+    await this.clearConversationState(ctx);
   }
 
   private async handleAmountInput(ctx: BotContext, text: string): Promise<void> {
@@ -785,15 +815,15 @@ Please send your **API Key** now:
     const apiClient = this.getUserApiClient(ctx);
     if (!apiClient) {
       await ctx.reply('❌ API session not found. Please try linking your credentials again.');
-      this.clearConversationState(ctx);
+      await this.clearConversationState(ctx);
       return;
     }
 
     const userId = ctx.userState?.userId || ctx.from!.id;
-    const state = this.conversationStates.get(userId);
+    const state = await this.db.getConversationState(userId);
     if (!state || !state.symbol || !state.marginType) {
       await ctx.reply('❌ Session expired. Please try again.');
-      this.clearConversationState(ctx);
+      await this.clearConversationState(ctx);
       return;
     }
 
@@ -812,15 +842,15 @@ Please send your **API Key** now:
       await ctx.reply(`❌ Failed to modify margin: ${error.message}`);
     }
 
-    this.clearConversationState(ctx);
+    await this.clearConversationState(ctx);
   }
 
-  private clearConversationState(ctx: BotContext): void {
+  private async clearConversationState(ctx: BotContext): Promise<void> {
     if (ctx.userState) {
       ctx.userState.conversationState = undefined;
     }
     const userId = ctx.userState?.userId || ctx.from!.id;
-    this.conversationStates.delete(userId);
+    await this.db.deleteConversationState(userId);
   }
 
   private async getSymbolService(userId: number): Promise<SymbolService> {
@@ -889,7 +919,7 @@ Please send your **API Key** now:
       }
 
       // Clear conversation state
-      this.clearConversationState(ctx);
+      await this.clearConversationState(ctx);
 
       // Show trading interface for the custom symbol
       console.log(`[DEBUG] Calling trading interface - tradingType: ${tradingType}, symbol: ${symbol}`);
@@ -921,7 +951,7 @@ Please send your **API Key** now:
       }
 
       // Clear conversation state
-      this.clearConversationState(ctx);
+      await this.clearConversationState(ctx);
 
       // Execute the trade based on parsed amount
       if (tradingType === 'spot') {
@@ -2052,10 +2082,9 @@ ${trade.maxSlippageExceeded ? '\n❌ **Max slippage exceeded**' : ''}
   private async handleSetStopLoss(ctx: BotContext, symbol: string, apiClient: AsterApiClient): Promise<void> {
     // Set conversation state to expect stop loss price input
     const userId = ctx.userState?.userId || ctx.from!.id;
-    this.conversationStates.set(userId, {
-      type: 'expecting_stop_loss',
-      symbol,
-      step: 'price'
+    await this.db.setConversationState(userId, {
+      step: 'price',
+      data: { type: 'expecting_stop_loss', symbol }
     });
     
     await ctx.reply(`🛡️ Please enter the stop loss price for ${symbol}:\n(Enter price like: 45000 or 0.025)`);
@@ -2064,10 +2093,9 @@ ${trade.maxSlippageExceeded ? '\n❌ **Max slippage exceeded**' : ''}
   private async handleSetTakeProfit(ctx: BotContext, symbol: string, apiClient: AsterApiClient): Promise<void> {
     // Set conversation state to expect take profit price input
     const userId = ctx.userState?.userId || ctx.from!.id;
-    this.conversationStates.set(userId, {
-      type: 'expecting_take_profit',
-      symbol,
-      step: 'price'
+    await this.db.setConversationState(userId, {
+      step: 'price',
+      data: { type: 'expecting_take_profit', symbol }
     });
     
     await ctx.reply(`🎯 Please enter the take profit price for ${symbol}:\n(Enter price like: 50000 or 0.030)`);
@@ -2076,11 +2104,9 @@ ${trade.maxSlippageExceeded ? '\n❌ **Max slippage exceeded**' : ''}
   private async handleAddMargin(ctx: BotContext, symbol: string, apiClient: AsterApiClient): Promise<void> {
     // Set conversation state to expect margin amount input
     const userId = ctx.userState?.userId || ctx.from!.id;
-    this.conversationStates.set(userId, {
-      type: 'expecting_margin',
-      symbol,
+    await this.db.setConversationState(userId, {
       step: 'amount',
-      marginType: 'add'
+      data: { type: 'expecting_margin', symbol, marginType: 'add' }
     });
     
     await ctx.reply(`➕ Please enter the margin amount to add for ${symbol}:\n(Enter amount like: 100 or 50.5)`);
@@ -2089,11 +2115,9 @@ ${trade.maxSlippageExceeded ? '\n❌ **Max slippage exceeded**' : ''}
   private async handleReduceMargin(ctx: BotContext, symbol: string, apiClient: AsterApiClient): Promise<void> {
     // Set conversation state to expect margin amount input
     const userId = ctx.userState?.userId || ctx.from!.id;
-    this.conversationStates.set(userId, {
-      type: 'expecting_margin',
-      symbol,
+    await this.db.setConversationState(userId, {
       step: 'amount',
-      marginType: 'reduce'
+      data: { type: 'expecting_margin', symbol, marginType: 'reduce' }
     });
     
     await ctx.reply(`➖ Please enter the margin amount to reduce for ${symbol}:\n(Enter amount like: 100 or 50.5)`);
@@ -2976,7 +3000,7 @@ ${preview.maxSlippageExceeded ? '\n❌ **Max slippage exceeded**' : ''}
       };
       
       ctx.userState.conversationState = updatedState;
-      this.conversationStates.set(ctx.userState.userId, updatedState);
+      await this.db.setConversationState(ctx.userState.userId, updatedState);
 
     } catch (error) {
       console.error('Custom pair selection error:', error);
@@ -3016,7 +3040,7 @@ ${preview.maxSlippageExceeded ? '\n❌ **Max slippage exceeded**' : ''}
       };
       
       ctx.userState.conversationState = updatedState;
-      this.conversationStates.set(ctx.userState.userId, updatedState);
+      await this.db.setConversationState(ctx.userState.userId, updatedState);
 
     } catch (error) {
       console.error('Custom amount input error:', error);

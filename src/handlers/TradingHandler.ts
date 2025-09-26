@@ -120,12 +120,15 @@ export class TradingHandler extends BaseHandler {
         });
 
         const futuresAccountService = await this.getFuturesAccountService(ctx.userState.userId);
-        const availableBalance = await futuresAccountService.getAvailableBalance();
 
         if (customSymbol) {
+          const availableBalance = await futuresAccountService.getAvailableBalance();
           await this.showCustomPerpsInterface(ctx, customSymbol, availableBalance);
         } else {
-          const portfolioSummary = await futuresAccountService.getPortfolioSummary();
+          const [availableBalance, portfolioSummary] = await Promise.all([
+            futuresAccountService.getAvailableBalance(),
+            futuresAccountService.getPortfolioSummary()
+          ]);
           await this.showPerpsTradingInterface(ctx, availableBalance, portfolioSummary);
         }
 

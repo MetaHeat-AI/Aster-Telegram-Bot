@@ -26,23 +26,28 @@ export class SpotAccountService {
   async getSpotBalances(): Promise<SpotBalance[]> {
     try {
       const accountInfo = await this.apiClient.getSpotAccount();
-      const balances: SpotBalance[] = [];
+      const balancesWithTotal = accountInfo.balances
+        .map(balance => {
+          const free = parseFloat(balance.free);
+          const locked = parseFloat(balance.locked);
+          const total = free + locked;
+          return { ...balance, total };
+        })
+        .filter(balance => balance.total > 0);
 
-      for (const balance of accountInfo.balances) {
-        const free = parseFloat(balance.free);
-        const locked = parseFloat(balance.locked);
-        const total = free + locked;
+      // Fetch USD values in parallel
+      const usdValuePromises = balancesWithTotal.map(async (balance) => {
+        const usdValue = await this.getUsdValue(balance.asset, balance.total);
+        return {
+          asset: balance.asset,
+          free: balance.free,
+          locked: balance.locked,
+          total: balance.total,
+          usdValue
+        };
+      });
 
-        if (total > 0) {
-          balances.push({
-            asset: balance.asset,
-            free: balance.free,
-            locked: balance.locked,
-            total,
-            usdValue: await this.getUsdValue(balance.asset, total)
-          });
-        }
-      }
+      const balances = await Promise.all(usdValuePromises);
 
       // Sort by USD value descending
       return balances.sort((a, b) => (b.usdValue || 0) - (a.usdValue || 0));

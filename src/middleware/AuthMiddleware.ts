@@ -111,10 +111,13 @@ export class AuthMiddleware {
         user = await this.db.createUser(telegramId);
       }
 
-      // Load additional data
-      const credentials = await this.db.getApiCredentials(user.id);
-      const settings = await this.db.getUserSettings(user.id) || 
-                      await this.db.createDefaultSettings(user.id);
+      // Load additional data in parallel
+      const [credentials, existingSettings] = await Promise.all([
+        this.db.getApiCredentials(user.id),
+        this.db.getUserSettings(user.id)
+      ]);
+      
+      const settings = existingSettings || await this.db.createDefaultSettings(user.id);
 
       const userState: UserState = {
         userId: user.id,
