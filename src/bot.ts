@@ -869,8 +869,8 @@ Please send your **API Key** now:
   private parseAmountString(text: string): { success: boolean; result?: any; error?: string } {
     const cleanText = text.trim().toLowerCase();
 
-    // Pattern 1: Dollar amount ($100, 100u, 100 usdt)
-    const dollarMatch = cleanText.match(/^\$?(\d+(?:\.\d+)?)\s*(?:u|usdt)?$/);
+    // Pattern 1: Dollar amount ($100, 100$, 100u, 100 usdt)
+    const dollarMatch = cleanText.match(/^(?:\$)?(\d+(?:\.\d+)?)(?:\$|u|usdt)?\s*$/);
     if (dollarMatch) {
       return {
         success: true,
@@ -906,8 +906,8 @@ Please send your **API Key** now:
       };
     }
 
-    // Pattern 4: With leverage (200u 10x, $100 5x)
-    const leverageMatch = cleanText.match(/^\$?(\d+(?:\.\d+)?)\s*(?:u|usdt)?\s*(\d+)x$/);
+    // Pattern 4: With leverage (200u 10x, $100 5x, 100$ 5x)
+    const leverageMatch = cleanText.match(/^(?:\$)?(\d+(?:\.\d+)?)(?:\$|u|usdt)?\s*(\d+)x$/);
     if (leverageMatch) {
       return {
         success: true,
@@ -1689,17 +1689,28 @@ ${trade.maxSlippageExceeded ? '\n❌ **Max slippage exceeded**' : ''}
       
       openPositions.forEach(pos => {
         const side = parseFloat(pos.positionAmt) > 0 ? '🟢 LONG' : '🔴 SHORT';
-        const pnl = parseFloat(pos.unrealizedPnl) || 0;
+        
+        // More robust PnL parsing
+        let pnl = 0;
+        if (pos.unrealizedPnl && pos.unrealizedPnl !== '' && pos.unrealizedPnl !== '0' && !isNaN(parseFloat(pos.unrealizedPnl))) {
+          pnl = parseFloat(pos.unrealizedPnl);
+        }
+        
         const pnlEmoji = pnl >= 0 ? '📈' : '📉';
+        const pnlColor = pnl >= 0 ? '🟢' : '🔴';
+        
+        // Debug logging for PnL issues
+        console.log(`[DEBUG] Position PnL for ${pos.symbol}: raw="${pos.unrealizedPnl}", parsed=${pnl}`);
         
         positionsText += [
           `**${pos.symbol}** ${side}`,
           `• Size: ${Math.abs(parseFloat(pos.positionAmt))}`,
-          `• Entry: $${pos.entryPrice}`,
+          `• Entry: $${parseFloat(pos.entryPrice).toFixed(4)}`,
           `• Leverage: ${pos.leverage}x`,
-          `• ${pnlEmoji} PnL: $${pnl.toFixed(2)}`,
+          `• ${pnlColor} ${pnlEmoji} PnL: ${pnl >= 0 ? '+' : ''}$${pnl.toFixed(2)}`,
+          pos.unrealizedPnl === '' || pos.unrealizedPnl === '0' ? `⚠️ (PnL not available)` : '',
           '',
-        ].join('\n');
+        ].filter(Boolean).join('\n');
       });
 
       // Enhanced positions with quick trading buttons
