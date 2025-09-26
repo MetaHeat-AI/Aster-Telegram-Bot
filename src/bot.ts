@@ -1044,22 +1044,39 @@ Please send your **API Key** now:
   private getMainMenuKeyboard() {
     return Markup.inlineKeyboard([
       [
-        Markup.button.callback('📈 Trade', 'unified_trade'),
-        Markup.button.callback('💰 Balance', 'balance')
+        Markup.button.callback('📈 Trade', 'unified_trade')
       ],
       [
-        Markup.button.callback('📊 Positions', 'positions'),
-        Markup.button.callback('📈 P&L Analysis', 'pnl_analysis')
+        Markup.button.callback('💰 Balance', 'balance'),
+        Markup.button.callback('📊 Positions', 'positions')
       ],
       [
-        Markup.button.callback('🔗 Link API', 'link_api'),
+        Markup.button.callback('📈 P&L Analysis', 'pnl_analysis'),
         Markup.button.callback('⚙️ Settings', 'settings')
       ],
       [
-        Markup.button.callback('📖 Help', 'help'),
-        Markup.button.callback('🔄 Main Menu', 'main_menu')
+        Markup.button.callback('🔗 Link API', 'link_api'),
+        Markup.button.callback('📖 Help', 'help')
       ]
     ]);
+  }
+
+  // Navigation helper functions for consistent UX
+  private getBackNavigation(backAction: string, showMainMenu: boolean = true) {
+    const buttons = [Markup.button.callback('🔙 Back', backAction)];
+    if (showMainMenu) {
+      buttons.push(Markup.button.callback('🏠 Home', 'main_menu'));
+    }
+    return [buttons];
+  }
+
+  private getTradingNavigation(currentMode: 'spot' | 'perps') {
+    return [
+      currentMode === 'spot' 
+        ? [Markup.button.callback('⚡ Switch to Perps', 'trade_perps')]
+        : [Markup.button.callback('🏪 Switch to Spot', 'trade_spot')],
+      ...this.getBackNavigation('unified_trade')
+    ];
   }
 
   private async showMainMenu(ctx: BotContext): Promise<void> {
@@ -1207,26 +1224,28 @@ ${TradeParser.generateExamples().map(ex => `• \`${ex}\``).join('\n')}
       ].join('\n');
 
       const keyboard = Markup.inlineKeyboard([
+        // Quick Buy Actions (Clean 2x2 grid)
         [
-          Markup.button.callback(`🟢 Buy $25`, `spot_execute_buy_${symbol}_25u`),
-          Markup.button.callback(`🟢 Buy $50`, `spot_execute_buy_${symbol}_50u`)
+          Markup.button.callback(`🟢 $25`, `spot_execute_buy_${symbol}_25u`),
+          Markup.button.callback(`🟢 $50`, `spot_execute_buy_${symbol}_50u`)
         ],
         [
-          Markup.button.callback(`🟢 Buy $100`, `spot_execute_buy_${symbol}_100u`),
-          Markup.button.callback(`🟢 Buy $250`, `spot_execute_buy_${symbol}_250u`)
+          Markup.button.callback(`🟢 $100`, `spot_execute_buy_${symbol}_100u`),
+          Markup.button.callback(`🟢 $250`, `spot_execute_buy_${symbol}_250u`)
+        ],
+        // Custom Actions (Separated for clarity)
+        [
+          Markup.button.callback(`💰 Custom Buy`, `spot_custom_amount_buy_${symbol}`)
         ],
         [
-          Markup.button.callback(`💰 Custom Amount`, `spot_custom_amount_buy_${symbol}`),
           Markup.button.callback(`🔴 Sell ${baseAsset}`, `spot_custom_amount_sell_${symbol}`)
         ],
+        // Mode Switch (Single clear option)
         [
-          Markup.button.callback('📈 Switch to Perps', `perps_custom_pair`),
-          Markup.button.callback('🎯 Another Pair', 'spot_custom_pair')
+          Markup.button.callback('⚡ Switch to Perps', 'trade_perps')
         ],
-        [
-          Markup.button.callback('🔙 Back to Spot Menu', 'trade_spot'),
-          Markup.button.callback('🏠 Main Menu', 'main_menu')
-        ]
+        // Clean Navigation
+        ...this.getBackNavigation('trade_spot')
       ]);
 
       // For custom interfaces, always use reply to avoid editing issues
@@ -1266,6 +1285,7 @@ ${TradeParser.generateExamples().map(ex => `• \`${ex}\``).join('\n')}
       ].join('\n');
 
       const keyboard = Markup.inlineKeyboard([
+        // Quick Long/Short Actions (Clean 2x3 grid)
         [
           Markup.button.callback(`📈 Long $25 5x`, `perps_execute_buy_${symbol}_25u_5x`),
           Markup.button.callback(`📉 Short $25 5x`, `perps_execute_sell_${symbol}_25u_5x`)
@@ -1278,18 +1298,19 @@ ${TradeParser.generateExamples().map(ex => `• \`${ex}\``).join('\n')}
           Markup.button.callback(`📈 Long $100 5x`, `perps_execute_buy_${symbol}_100u_5x`),
           Markup.button.callback(`📉 Short $100 5x`, `perps_execute_sell_${symbol}_100u_5x`)
         ],
+        // Custom Actions (Separated for clarity)
         [
-          Markup.button.callback(`💰 Custom Amount`, `perps_custom_amount_buy_${symbol}`),
+          Markup.button.callback(`💰 Custom Long`, `perps_custom_amount_buy_${symbol}`)
+        ],
+        [
           Markup.button.callback(`💰 Custom Short`, `perps_custom_amount_sell_${symbol}`)
         ],
+        // Mode Switch (Single clear option)
         [
-          Markup.button.callback('🏪 Switch to Spot', `spot_custom_pair`),
-          Markup.button.callback('🎯 Another Pair', 'perps_custom_pair')
+          Markup.button.callback('🏪 Switch to Spot', 'trade_spot')
         ],
-        [
-          Markup.button.callback('🔙 Back to Perps Menu', 'trade_perps'),
-          Markup.button.callback('🏠 Main Menu', 'main_menu')
-        ]
+        // Clean Navigation
+        ...this.getBackNavigation('trade_perps')
       ]);
 
       console.log(`[DEBUG] Sending custom perps interface for ${symbol}...`);
@@ -2227,11 +2248,12 @@ ${trade.maxSlippageExceeded ? '\n❌ **Max slippage exceeded**' : ''}
       return;
     }
 
-    const apiClient = this.getUserApiClient(ctx);
-    console.log(`[DEBUG] API Client found: ${!!apiClient}`);
-    
-    if (!apiClient) {
-      console.log(`[DEBUG] No API client found for user ${ctx.userState?.userId || ctx.from?.id}`);
+    let apiClient: AsterApiClient;
+    try {
+      apiClient = await this.getOrCreateApiClient(ctx.userState.userId);
+      console.log(`[DEBUG] API Client created/retrieved successfully`);
+    } catch (error) {
+      console.log(`[DEBUG] Failed to get/create API client:`, error);
       await ctx.reply('❌ API session not found. Please try linking your credentials again.');
       return;
     }
@@ -2249,7 +2271,7 @@ ${trade.maxSlippageExceeded ? '\n❌ **Max slippage exceeded**' : ''}
         availableUsdt = usdtBalance ? parseFloat(usdtBalance.free) : 0;
         console.log(`[DEBUG] Available USDT from spot: ${availableUsdt}`);
       } catch (spotError) {
-        console.warn(`[DEBUG] Spot account API failed, trying futures account:`, spotError);
+        console.warn(`[DEBUG] Spot account API failed (expected for some exchanges), trying futures account:`, spotError);
         
         // Fallback to futures account if spot account doesn't work
         try {
@@ -2258,6 +2280,7 @@ ${trade.maxSlippageExceeded ? '\n❌ **Max slippage exceeded**' : ''}
           console.log(`[DEBUG] Available USDT from futures fallback: ${availableUsdt}`);
         } catch (futuresError) {
           console.error(`[DEBUG] Both spot and futures account APIs failed:`, futuresError);
+          // Don't throw here, just use 0 balance
           availableUsdt = 0;
         }
       }
@@ -2284,26 +2307,28 @@ ${trade.maxSlippageExceeded ? '\n❌ **Max slippage exceeded**' : ''}
       ].join('\n');
 
       const keyboard = Markup.inlineKeyboard([
+        // Popular Coins (Clean 2x2 grid)
         [
-          Markup.button.callback('₿ Buy BTC', 'spot_buy_BTCUSDT'),
-          Markup.button.callback('⟠ Buy ETH', 'spot_buy_ETHUSDT')
+          Markup.button.callback('₿ Bitcoin', 'spot_buy_BTCUSDT'),
+          Markup.button.callback('⟠ Ethereum', 'spot_buy_ETHUSDT')
         ],
         [
-          Markup.button.callback('◎ Buy SOL', 'spot_buy_SOLUSDT'),
-          Markup.button.callback('🪙 Buy ASTER', 'spot_buy_ASTERUSDT')
+          Markup.button.callback('◎ Solana', 'spot_buy_SOLUSDT'),
+          Markup.button.callback('🪙 Aster', 'spot_buy_ASTERUSDT')
+        ],
+        // Actions (Separated for clarity)
+        [
+          Markup.button.callback('🎯 Custom Pair', 'spot_custom_pair')
         ],
         [
-          Markup.button.callback('🎯 Custom Pair', 'spot_custom_pair'),
           Markup.button.callback('💱 Sell Assets', 'spot_sell_menu')
         ],
+        // Utilities
         [
-          Markup.button.callback('📋 Spot Orders', 'spot_orders'),
           Markup.button.callback('💰 Balance', 'balance')
         ],
-        [
-          Markup.button.callback('🔙 Back to Trade Menu', 'unified_trade'),
-          Markup.button.callback('🏠 Main Menu', 'main_menu')
-        ]
+        // Trading Mode Switch
+        ...this.getTradingNavigation('spot')
       ]);
 
       console.log(`[DEBUG] Sending spot interface message...`);
@@ -2333,11 +2358,12 @@ ${trade.maxSlippageExceeded ? '\n❌ **Max slippage exceeded**' : ''}
       return;
     }
 
-    const apiClient = this.getUserApiClient(ctx);
-    console.log(`[DEBUG] Perps API Client found: ${!!apiClient}`);
-    
-    if (!apiClient) {
-      console.log(`[DEBUG] No API client found for perps user ${ctx.userState?.userId || ctx.from?.id}`);
+    let apiClient: AsterApiClient;
+    try {
+      apiClient = await this.getOrCreateApiClient(ctx.userState.userId);
+      console.log(`[DEBUG] Perps API Client created/retrieved successfully`);
+    } catch (error) {
+      console.log(`[DEBUG] Failed to get/create perps API client:`, error);
       await ctx.reply('❌ API session not found. Please try linking your credentials again.');
       return;
     }
@@ -2377,6 +2403,7 @@ ${trade.maxSlippageExceeded ? '\n❌ **Max slippage exceeded**' : ''}
       ].join('\n');
 
       const keyboard = Markup.inlineKeyboard([
+        // Popular Perps (Clean Long/Short pairs)
         [
           Markup.button.callback('📈 Long BTC', 'perps_buy_BTCUSDT'),
           Markup.button.callback('📉 Short BTC', 'perps_sell_BTCUSDT')
@@ -2389,18 +2416,19 @@ ${trade.maxSlippageExceeded ? '\n❌ **Max slippage exceeded**' : ''}
           Markup.button.callback('📈 Long SOL', 'perps_buy_SOLUSDT'),
           Markup.button.callback('📉 Short SOL', 'perps_sell_SOLUSDT')
         ],
+        // Actions (Separated for clarity)
         [
-          Markup.button.callback('🎯 Custom Pair', 'perps_custom_pair'),
-          Markup.button.callback('📊 Open Positions', 'positions')
+          Markup.button.callback('🎯 Custom Pair', 'perps_custom_pair')
         ],
         [
-          Markup.button.callback('⚙️ Leverage Settings', 'leverage_settings'),
+          Markup.button.callback('📊 Positions', 'positions')
+        ],
+        // Utilities
+        [
           Markup.button.callback('💰 Balance', 'balance')
         ],
-        [
-          Markup.button.callback('🔙 Back to Trade Menu', 'unified_trade'),
-          Markup.button.callback('🏠 Main Menu', 'main_menu')
-        ]
+        // Trading Mode Switch
+        ...this.getTradingNavigation('perps')
       ]);
 
       console.log(`[DEBUG] Sending perps interface message...`);
