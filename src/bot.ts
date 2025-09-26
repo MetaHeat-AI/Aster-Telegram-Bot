@@ -2048,8 +2048,7 @@ ${trade.maxSlippageExceeded ? '\n❌ **Max slippage exceeded**' : ''}
           Markup.button.callback('🔴 Sell 100%', `quick_sell_100p_${symbol}`)
         ],
         [
-          Markup.button.callback('📊 Manage Position', `position_manage_${symbol}`),
-          Markup.button.callback('📈 Advanced Trade', `unified_trade`)
+          Markup.button.callback('📊 Manage Position', `position_manage_${symbol}`)
         ],
         [
           Markup.button.callback('🔙 Back to Positions', 'positions')
@@ -2685,8 +2684,7 @@ ${trade.maxSlippageExceeded ? '\n❌ **Max slippage exceeded**' : ''}
         Markup.button.callback('$500 × 10x', `perps_execute_${action}_${symbol}_500u_10x`)
       ],
       [
-        Markup.button.callback('🎯 Custom Size', `perps_custom_amount_${action}_${symbol}`),
-        Markup.button.callback('⚙️ Advanced', `perps_advanced_${action}_${symbol}`)
+        Markup.button.callback('🎯 Custom Size', `perps_custom_amount_${action}_${symbol}`)
       ],
       [
         Markup.button.callback('🔙 Back to Perps', 'trade_perps')
