@@ -801,9 +801,12 @@ Please send your **API Key** now:
     const symbol = text.toUpperCase().replace(/\s/g, '');
     const tradingType = ctx.userState.conversationState.data.tradingType as 'spot' | 'perps';
 
-    // Validate symbol format
-    if (!/^[A-Z]+USDT$/.test(symbol)) {
-      await ctx.reply('❌ Invalid symbol format. Please use format like BTCUSDT, ETHUSDT, etc.');
+    console.log(`[DEBUG] Custom pair input: "${text}" -> "${symbol}" for ${tradingType}`);
+
+    // Validate symbol format (allow letters and numbers)
+    if (!/^[A-Z0-9]+USDT$/.test(symbol)) {
+      console.log(`[DEBUG] Symbol validation failed for: ${symbol}`);
+      await ctx.reply('❌ Invalid symbol format. Please use format like BTCUSDT, ETHUSDT, BNBUSDT, etc.');
       return;
     }
 
@@ -811,7 +814,7 @@ Please send your **API Key** now:
       // Check if symbol exists by trying to get current price
       const currentPrice = await this.getCurrentPrice(symbol);
       if (currentPrice === 0) {
-        await ctx.reply(`❌ Symbol ${symbol} not found or not available for trading.`);
+        await ctx.reply(`❌ Symbol ${symbol} not found or not available for trading. Please check the symbol name and try again.`);
         return;
       }
 
@@ -827,7 +830,8 @@ Please send your **API Key** now:
 
     } catch (error) {
       console.error('Custom pair input error:', error);
-      await ctx.reply(`❌ Error validating symbol ${symbol}. Please try again.`);
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+      await ctx.reply(`❌ Error validating symbol ${symbol}: ${errorMessage}. Please try again.`);
     }
   }
 
@@ -1176,6 +1180,112 @@ ${TradeParser.generateExamples().map(ex => `• \`${ex}\``).join('\n')}
       
     } catch (error) {
       console.error('[Bot] Failed to setup commands menu:', error);
+    }
+  }
+
+  private async showCustomSpotInterface(ctx: BotContext, symbol: string, availableUsdt: number): Promise<void> {
+    try {
+      // Get current price and basic info
+      const currentPrice = await this.getCurrentPrice(symbol);
+      const baseAsset = symbol.replace('USDT', '');
+      
+      const spotText = [
+        `🏪 **Spot Trading: ${symbol}**`,
+        '',
+        `💰 **Available USDT:** $${availableUsdt.toFixed(2)}`,
+        `💹 **Current Price:** $${currentPrice.toFixed(6)}`,
+        '',
+        `**${baseAsset} Spot Trading:**`,
+        '• Trade real assets with no leverage',
+        '• Direct ownership of tokens',
+        '• Perfect for long-term holding',
+        '',
+        '**Quick Actions:**'
+      ].join('\n');
+
+      const keyboard = Markup.inlineKeyboard([
+        [
+          Markup.button.callback(`🟢 Buy $25`, `spot_execute_buy_${symbol}_25u`),
+          Markup.button.callback(`🟢 Buy $50`, `spot_execute_buy_${symbol}_50u`)
+        ],
+        [
+          Markup.button.callback(`🟢 Buy $100`, `spot_execute_buy_${symbol}_100u`),
+          Markup.button.callback(`🟢 Buy $250`, `spot_execute_buy_${symbol}_250u`)
+        ],
+        [
+          Markup.button.callback(`💰 Custom Amount`, `spot_custom_amount_buy_${symbol}`),
+          Markup.button.callback(`🔴 Sell ${baseAsset}`, `spot_custom_amount_sell_${symbol}`)
+        ],
+        [
+          Markup.button.callback('📈 Switch to Perps', `perps_custom_pair`),
+          Markup.button.callback('🎯 Another Pair', 'spot_custom_pair')
+        ],
+        [
+          Markup.button.callback('🔙 Back to Spot Menu', 'trade_spot'),
+          Markup.button.callback('🏠 Main Menu', 'main_menu')
+        ]
+      ]);
+
+      await ctx.editMessageText(spotText, { parse_mode: 'Markdown', ...keyboard });
+      
+    } catch (error) {
+      console.error('Custom spot interface error:', error);
+      await ctx.reply(`❌ Failed to load ${symbol} trading interface. Please try again.`);
+    }
+  }
+
+  private async showCustomPerpsInterface(ctx: BotContext, symbol: string, availableBalance: number): Promise<void> {
+    try {
+      // Get current price and basic info
+      const currentPrice = await this.getCurrentPrice(symbol);
+      const baseAsset = symbol.replace('USDT', '');
+      
+      const perpsText = [
+        `⚡ **Perps Trading: ${symbol}**`,
+        '',
+        `💰 **Available Balance:** $${availableBalance.toFixed(2)}`,
+        `💹 **Current Price:** $${currentPrice.toFixed(6)}`,
+        '',
+        `**${baseAsset} Perpetual Futures:**`,
+        '• Leveraged trading up to 125x',
+        '• Long and short positions',
+        '• Advanced trading features',
+        '',
+        '**Quick Actions:**'
+      ].join('\n');
+
+      const keyboard = Markup.inlineKeyboard([
+        [
+          Markup.button.callback(`📈 Long $25 5x`, `perps_execute_buy_${symbol}_25u_5x`),
+          Markup.button.callback(`📉 Short $25 5x`, `perps_execute_sell_${symbol}_25u_5x`)
+        ],
+        [
+          Markup.button.callback(`📈 Long $50 10x`, `perps_execute_buy_${symbol}_50u_10x`),
+          Markup.button.callback(`📉 Short $50 10x`, `perps_execute_sell_${symbol}_50u_10x`)
+        ],
+        [
+          Markup.button.callback(`📈 Long $100 5x`, `perps_execute_buy_${symbol}_100u_5x`),
+          Markup.button.callback(`📉 Short $100 5x`, `perps_execute_sell_${symbol}_100u_5x`)
+        ],
+        [
+          Markup.button.callback(`💰 Custom Amount`, `perps_custom_amount_buy_${symbol}`),
+          Markup.button.callback(`💰 Custom Short`, `perps_custom_amount_sell_${symbol}`)
+        ],
+        [
+          Markup.button.callback('🏪 Switch to Spot', `spot_custom_pair`),
+          Markup.button.callback('🎯 Another Pair', 'perps_custom_pair')
+        ],
+        [
+          Markup.button.callback('🔙 Back to Perps Menu', 'trade_perps'),
+          Markup.button.callback('🏠 Main Menu', 'main_menu')
+        ]
+      ]);
+
+      await ctx.editMessageText(perpsText, { parse_mode: 'Markdown', ...keyboard });
+      
+    } catch (error) {
+      console.error('Custom perps interface error:', error);
+      await ctx.reply(`❌ Failed to load ${symbol} trading interface. Please try again.`);
     }
   }
 
@@ -2102,6 +2212,12 @@ ${trade.maxSlippageExceeded ? '\n❌ **Max slippage exceeded**' : ''}
       const usdtBalance = accountInfo.balances.find((b: any) => b.asset === 'USDT');
       const availableUsdt = usdtBalance ? parseFloat(usdtBalance.free) : 0;
 
+      // If custom symbol is provided, show custom trading interface
+      if (customSymbol) {
+        await this.showCustomSpotInterface(ctx, customSymbol, availableUsdt);
+        return;
+      }
+
       const spotText = [
         '🏪 **Spot Trading Interface**',
         '',
@@ -2163,6 +2279,12 @@ ${trade.maxSlippageExceeded ? '\n❌ **Max slippage exceeded**' : ''}
       const accountInfo = await apiClient.getAccountInfo();
       const availableBalance = parseFloat(accountInfo.availableBalance || '0');
       const totalWallet = parseFloat(accountInfo.totalWalletBalance || '0');
+
+      // If custom symbol is provided, show custom trading interface
+      if (customSymbol) {
+        await this.showCustomPerpsInterface(ctx, customSymbol, availableBalance);
+        return;
+      }
 
       const perpsText = [
         '⚡ **Perps Trading Interface**',
