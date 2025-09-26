@@ -943,7 +943,25 @@ Please send your **API Key** now:
       if (amountData.type === 'usdt') {
         orderParams.quoteOrderQty = amountData.amount.toString();
       } else if (amountData.type === 'asset') {
-        orderParams.quantity = amountData.amount.toString();
+        // Apply precision formatting for asset quantity
+        const exchangeInfo = await apiClient.getExchangeInfo();
+        const symbolInfo = exchangeInfo.symbols.find((s: any) => s.symbol === symbol);
+        
+        if (symbolInfo) {
+          const lotSizeFilter = symbolInfo.filters.find((f: any) => f.filterType === 'LOT_SIZE');
+          if (lotSizeFilter) {
+            const stepSize = parseFloat(lotSizeFilter.stepSize);
+            const adjustedQuantity = Math.floor(amountData.amount / stepSize) * stepSize;
+            const decimalPlaces = lotSizeFilter.stepSize.split('.')[1]?.length || 0;
+            orderParams.quantity = adjustedQuantity.toFixed(decimalPlaces);
+            
+            console.log(`[SPOT PRECISION] Raw: ${amountData.amount}, Adjusted: ${orderParams.quantity}, StepSize: ${stepSize}`);
+          } else {
+            orderParams.quantity = parseFloat(amountData.amount).toFixed(6);
+          }
+        } else {
+          orderParams.quantity = parseFloat(amountData.amount).toFixed(6);
+        }
       } else if (amountData.type === 'percentage') {
         // Get balance and calculate percentage
         const balance = await apiClient.getSpotAccount();
@@ -999,9 +1017,37 @@ Please send your **API Key** now:
         throw new Error('Unsupported amount type for futures trading');
       }
 
-      // Calculate quantity
+      // Calculate quantity with proper precision
       const currentPrice = await this.getCurrentPrice(symbol);
-      const quantity = (usdtAmount / currentPrice).toString();
+      const rawQuantity = usdtAmount / currentPrice;
+      
+      // Get exchange info for precision limits
+      const exchangeInfo = await apiClient.getExchangeInfo();
+      const symbolInfo = exchangeInfo.symbols.find((s: any) => s.symbol === symbol);
+      
+      if (!symbolInfo) {
+        throw new Error(`Symbol ${symbol} not found in exchange info`);
+      }
+      
+      // Get quantity precision from lot size filter
+      const lotSizeFilter = symbolInfo.filters.find((f: any) => f.filterType === 'LOT_SIZE');
+      let quantity: string;
+      
+      if (lotSizeFilter) {
+        // Calculate step size precision
+        const stepSize = parseFloat(lotSizeFilter.stepSize);
+        const adjustedQuantity = Math.floor(rawQuantity / stepSize) * stepSize;
+        
+        // Format to appropriate decimal places
+        const decimalPlaces = lotSizeFilter.stepSize.split('.')[1]?.length || 0;
+        quantity = adjustedQuantity.toFixed(decimalPlaces);
+        
+        console.log(`[PRECISION] Raw: ${rawQuantity}, Adjusted: ${quantity}, StepSize: ${stepSize}`);
+      } else {
+        // Fallback to 6 decimal places if no filter found
+        quantity = rawQuantity.toFixed(6);
+        console.log(`[PRECISION] No LOT_SIZE filter, using default: ${quantity}`);
+      }
 
       const order = await apiClient.createOrder({
         symbol,
