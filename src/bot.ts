@@ -555,6 +555,17 @@ Choose an action below to get started:
       }
     };
     
+    // Root endpoint for browser visitors
+    this.server.get('/', (req: any, res: any) => {
+      res.json({
+        message: 'Aster DEX Trading Bot API',
+        status: 'running',
+        telegram: 'This is a Telegram bot service',
+        health_check: '/health',
+        timestamp: new Date().toISOString()
+      });
+    });
+
     this.server.get('/health', healthHandler);
     this.server.get('/healthz', healthHandler);
 
