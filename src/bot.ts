@@ -822,9 +822,12 @@ Please send your **API Key** now:
       this.clearConversationState(ctx);
 
       // Show trading interface for the custom symbol
+      console.log(`[DEBUG] Calling trading interface - tradingType: ${tradingType}, symbol: ${symbol}`);
       if (tradingType === 'spot') {
+        console.log(`[DEBUG] Calling handleSpotTradingInterface with symbol: ${symbol}`);
         await this.handleSpotTradingInterface(ctx, symbol);
       } else {
+        console.log(`[DEBUG] Calling handlePerpsTradingInterface with symbol: ${symbol}`);
         await this.handlePerpsTradingInterface(ctx, symbol);
       }
 
@@ -1226,19 +1229,27 @@ ${TradeParser.generateExamples().map(ex => `• \`${ex}\``).join('\n')}
         ]
       ]);
 
-      await ctx.editMessageText(spotText, { parse_mode: 'Markdown', ...keyboard });
+      // For custom interfaces, always use reply to avoid editing issues
+      await ctx.reply(spotText, { parse_mode: 'Markdown', ...keyboard });
       
     } catch (error) {
       console.error('Custom spot interface error:', error);
-      await ctx.reply(`❌ Failed to load ${symbol} trading interface. Please try again.`);
+      console.error('Error stack:', error instanceof Error ? error.stack : 'No stack trace');
+      const errorMsg = error instanceof Error ? error.message : 'Unknown error';
+      await ctx.reply(`❌ Failed to load ${symbol} trading interface: ${errorMsg}. Please try again.`);
     }
   }
 
   private async showCustomPerpsInterface(ctx: BotContext, symbol: string, availableBalance: number): Promise<void> {
     try {
+      console.log(`[DEBUG] showCustomPerpsInterface called for ${symbol} with balance ${availableBalance}`);
+      
       // Get current price and basic info
       const currentPrice = await this.getCurrentPrice(symbol);
+      console.log(`[DEBUG] Current price for ${symbol}: ${currentPrice}`);
+      
       const baseAsset = symbol.replace('USDT', '');
+      console.log(`[DEBUG] Base asset: ${baseAsset}`);
       
       const perpsText = [
         `⚡ **Perps Trading: ${symbol}**`,
@@ -1281,25 +1292,38 @@ ${TradeParser.generateExamples().map(ex => `• \`${ex}\``).join('\n')}
         ]
       ]);
 
-      await ctx.editMessageText(perpsText, { parse_mode: 'Markdown', ...keyboard });
+      console.log(`[DEBUG] Sending custom perps interface for ${symbol}...`);
+      // For custom interfaces, always use reply to avoid editing issues
+      await ctx.reply(perpsText, { parse_mode: 'Markdown', ...keyboard });
+      console.log(`[DEBUG] Custom perps interface sent successfully via reply`);
       
     } catch (error) {
       console.error('Custom perps interface error:', error);
-      await ctx.reply(`❌ Failed to load ${symbol} trading interface. Please try again.`);
+      console.error('Error stack:', error instanceof Error ? error.stack : 'No stack trace');
+      const errorMsg = error instanceof Error ? error.message : 'Unknown error';
+      await ctx.reply(`❌ Failed to load ${symbol} trading interface: ${errorMsg}. Please try again.`);
     }
   }
 
   private getUserApiClient(ctx: BotContext): AsterApiClient | null {
+    console.log(`[DEBUG] getUserApiClient - userState.userId: ${ctx.userState?.userId}, ctx.from.id: ${ctx.from?.id}`);
+    console.log(`[DEBUG] Available sessions: ${Array.from(this.userSessions.keys())}`);
+    
     // Try to get the API client using the correct user ID
     if (ctx.userState?.userId) {
-      return this.userSessions.get(ctx.userState.userId) || null;
+      const client = this.userSessions.get(ctx.userState.userId);
+      console.log(`[DEBUG] Client found for userState.userId ${ctx.userState.userId}: ${!!client}`);
+      return client || null;
     }
     
     // Fallback to ctx.from.id if userState is not available
     if (ctx.from?.id) {
-      return this.userSessions.get(ctx.from.id) || null;
+      const client = this.userSessions.get(ctx.from.id);
+      console.log(`[DEBUG] Client found for ctx.from.id ${ctx.from.id}: ${!!client}`);
+      return client || null;
     }
     
+    console.log(`[DEBUG] No user ID available to lookup API client`);
     return null;
   }
 
@@ -2195,29 +2219,57 @@ ${trade.maxSlippageExceeded ? '\n❌ **Max slippage exceeded**' : ''}
   }
 
   private async handleSpotTradingInterface(ctx: BotContext, customSymbol?: string): Promise<void> {
+    console.log(`[DEBUG] Spot trading interface - User ID: ${ctx.from?.id}, User State: ${!!ctx.userState}, Is Linked: ${ctx.userState?.isLinked}`);
+    
     if (!ctx.userState?.isLinked) {
+      console.log(`[DEBUG] User not linked - userState: ${!!ctx.userState}, isLinked: ${ctx.userState?.isLinked}`);
       await ctx.reply('❌ Please link your API credentials first using /link');
       return;
     }
 
     const apiClient = this.getUserApiClient(ctx);
+    console.log(`[DEBUG] API Client found: ${!!apiClient}`);
+    
     if (!apiClient) {
+      console.log(`[DEBUG] No API client found for user ${ctx.userState?.userId || ctx.from?.id}`);
       await ctx.reply('❌ API session not found. Please try linking your credentials again.');
       return;
     }
 
     try {
-      // Get spot account info
-      const accountInfo = await apiClient.getSpotAccount();
-      const usdtBalance = accountInfo.balances.find((b: any) => b.asset === 'USDT');
-      const availableUsdt = usdtBalance ? parseFloat(usdtBalance.free) : 0;
+      console.log(`[DEBUG] Getting spot account info...`);
+      let availableUsdt = 0;
+      
+      try {
+        // Try to get spot account info
+        const accountInfo = await apiClient.getSpotAccount();
+        console.log(`[DEBUG] Spot account info received: ${JSON.stringify(accountInfo).substring(0, 200)}...`);
+        
+        const usdtBalance = accountInfo.balances.find((b: any) => b.asset === 'USDT');
+        availableUsdt = usdtBalance ? parseFloat(usdtBalance.free) : 0;
+        console.log(`[DEBUG] Available USDT from spot: ${availableUsdt}`);
+      } catch (spotError) {
+        console.warn(`[DEBUG] Spot account API failed, trying futures account:`, spotError);
+        
+        // Fallback to futures account if spot account doesn't work
+        try {
+          const futuresAccount = await apiClient.getAccountInfo();
+          availableUsdt = parseFloat(futuresAccount.availableBalance || '0');
+          console.log(`[DEBUG] Available USDT from futures fallback: ${availableUsdt}`);
+        } catch (futuresError) {
+          console.error(`[DEBUG] Both spot and futures account APIs failed:`, futuresError);
+          availableUsdt = 0;
+        }
+      }
 
       // If custom symbol is provided, show custom trading interface
       if (customSymbol) {
+        console.log(`[DEBUG] Showing custom spot interface for ${customSymbol}`);
         await this.showCustomSpotInterface(ctx, customSymbol, availableUsdt);
         return;
       }
 
+      console.log(`[DEBUG] Creating spot interface text and keyboard...`);
       const spotText = [
         '🏪 **Spot Trading Interface**',
         '',
@@ -2254,36 +2306,60 @@ ${trade.maxSlippageExceeded ? '\n❌ **Max slippage exceeded**' : ''}
         ]
       ]);
 
-      await ctx.editMessageText(spotText, { parse_mode: 'Markdown', ...keyboard });
+      console.log(`[DEBUG] Sending spot interface message...`);
+      try {
+        await ctx.editMessageText(spotText, { parse_mode: 'Markdown', ...keyboard });
+        console.log(`[DEBUG] Spot interface sent successfully via editMessageText`);
+      } catch (editError) {
+        console.log(`[DEBUG] editMessageText failed, trying reply:`, editError);
+        await ctx.reply(spotText, { parse_mode: 'Markdown', ...keyboard });
+        console.log(`[DEBUG] Spot interface sent successfully via reply`);
+      }
 
     } catch (error) {
       console.error('Spot trading interface error:', error);
-      await ctx.reply('❌ Failed to load spot trading interface. Please try again.');
+      console.error('Error stack:', error instanceof Error ? error.stack : 'No stack trace');
+      const errorMsg = error instanceof Error ? error.message : 'Unknown error';
+      await ctx.reply(`❌ Failed to load spot trading interface: ${errorMsg}. Please try again.`);
     }
   }
 
   private async handlePerpsTradingInterface(ctx: BotContext, customSymbol?: string): Promise<void> {
+    console.log(`[DEBUG] Perps trading interface - User ID: ${ctx.from?.id}, User State: ${!!ctx.userState}, Is Linked: ${ctx.userState?.isLinked}, Custom Symbol: ${customSymbol}`);
+    
     if (!ctx.userState?.isLinked) {
+      console.log(`[DEBUG] User not linked for perps - userState: ${!!ctx.userState}, isLinked: ${ctx.userState?.isLinked}`);
       await ctx.reply('❌ Please link your API credentials first using /link');
       return;
     }
 
     const apiClient = this.getUserApiClient(ctx);
+    console.log(`[DEBUG] Perps API Client found: ${!!apiClient}`);
+    
     if (!apiClient) {
+      console.log(`[DEBUG] No API client found for perps user ${ctx.userState?.userId || ctx.from?.id}`);
       await ctx.reply('❌ API session not found. Please try linking your credentials again.');
       return;
     }
 
     try {
+      console.log(`[DEBUG] Getting perps account info...`);
       // Get futures account info
       const accountInfo = await apiClient.getAccountInfo();
+      console.log(`[DEBUG] Perps account info received: ${JSON.stringify(accountInfo).substring(0, 200)}...`);
+      
       const availableBalance = parseFloat(accountInfo.availableBalance || '0');
       const totalWallet = parseFloat(accountInfo.totalWalletBalance || '0');
+      console.log(`[DEBUG] Available balance: ${availableBalance}, Total wallet: ${totalWallet}`);
 
       // If custom symbol is provided, show custom trading interface
-      if (customSymbol) {
+      console.log(`[DEBUG] Checking customSymbol: ${customSymbol}, type: ${typeof customSymbol}`);
+      if (customSymbol && customSymbol.trim()) {
+        console.log(`[DEBUG] Showing custom perps interface for ${customSymbol}`);
         await this.showCustomPerpsInterface(ctx, customSymbol, availableBalance);
         return;
+      } else {
+        console.log(`[DEBUG] No custom symbol, showing regular perps interface`);
       }
 
       const perpsText = [
@@ -2327,11 +2403,21 @@ ${trade.maxSlippageExceeded ? '\n❌ **Max slippage exceeded**' : ''}
         ]
       ]);
 
-      await ctx.editMessageText(perpsText, { parse_mode: 'Markdown', ...keyboard });
+      console.log(`[DEBUG] Sending perps interface message...`);
+      try {
+        await ctx.editMessageText(perpsText, { parse_mode: 'Markdown', ...keyboard });
+        console.log(`[DEBUG] Perps interface sent successfully via editMessageText`);
+      } catch (editError) {
+        console.log(`[DEBUG] editMessageText failed for perps, trying reply:`, editError);
+        await ctx.reply(perpsText, { parse_mode: 'Markdown', ...keyboard });
+        console.log(`[DEBUG] Perps interface sent successfully via reply`);
+      }
 
     } catch (error) {
       console.error('Perps trading interface error:', error);
-      await ctx.reply('❌ Failed to load perps trading interface. Please try again.');
+      console.error('Error stack:', error instanceof Error ? error.stack : 'No stack trace');
+      const errorMsg = error instanceof Error ? error.message : 'Unknown error';
+      await ctx.reply(`❌ Failed to load perps trading interface: ${errorMsg}. Please try again.`);
     }
   }
 
