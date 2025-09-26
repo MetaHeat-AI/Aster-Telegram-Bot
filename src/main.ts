@@ -11,12 +11,12 @@ dotenv.config();
 function loadConfig(): BotConfig {
   const config = {
     telegram: {
-      token: process.env.TELEGRAM_BOT_TOKEN!,
+      token: process.env.TELEGRAM_BOT_TOKEN || process.env.TG_BOT_TOKEN!,
       adminIds: process.env.ADMIN_IDS?.split(',').map(id => parseInt(id.trim())) || [],
     },
     aster: {
-      baseUrl: process.env.ASTER_BASE_URL || 'https://api.aster.exchange',
-      defaultRecvWindow: parseInt(process.env.ASTER_RECV_WINDOW || '5000'),
+      baseUrl: process.env.ASTER_BASE_URL || 'https://fapi.asterdex.com',
+      defaultRecvWindow: parseInt(process.env.DEFAULT_RECV_WINDOW || '5000'),
       maxLeverage: parseInt(process.env.MAX_LEVERAGE || '20'),
     },
     database: {
@@ -32,8 +32,8 @@ function loadConfig(): BotConfig {
       port: parseInt(process.env.PORT || '3000'),
     },
     rateLimit: {
-      windowMs: parseInt(process.env.RATE_LIMIT_WINDOW || '60000'),
-      maxRequests: parseInt(process.env.RATE_LIMIT_MAX || '100'),
+      windowMs: parseInt(process.env.RATE_LIMIT_WINDOW_MS || '60000'),
+      maxRequests: parseInt(process.env.RATE_LIMIT_MAX_REQUESTS || '100'),
     },
   };
 
