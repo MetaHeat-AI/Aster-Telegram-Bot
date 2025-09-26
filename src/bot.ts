@@ -2180,6 +2180,35 @@ ${trade.maxSlippageExceeded ? '\n❌ **Max slippage exceeded**' : ''}
     }
   }
 
+  /**
+   * Apply proper precision formatting to quantity based on exchange info
+   */
+  private async formatQuantityWithPrecision(apiClient: AsterApiClient, symbol: string, rawQuantity: number): Promise<string> {
+    try {
+      const exchangeInfo = await apiClient.getExchangeInfo();
+      const symbolInfo = exchangeInfo.symbols.find((s: any) => s.symbol === symbol);
+      
+      if (symbolInfo) {
+        const lotSizeFilter = symbolInfo.filters.find((f: any) => f.filterType === 'LOT_SIZE');
+        if (lotSizeFilter) {
+          const stepSize = parseFloat(lotSizeFilter.stepSize);
+          const adjustedQuantity = Math.floor(rawQuantity / stepSize) * stepSize;
+          const decimalPlaces = lotSizeFilter.stepSize.split('.')[1]?.length || 0;
+          const formattedQuantity = adjustedQuantity.toFixed(decimalPlaces);
+          
+          console.log(`[PRECISION] ${symbol} - Raw: ${rawQuantity}, Adjusted: ${formattedQuantity}, StepSize: ${stepSize}`);
+          return formattedQuantity;
+        }
+      }
+      
+      // Fallback to 6 decimal places
+      return rawQuantity.toFixed(6);
+    } catch (error) {
+      console.warn(`[PRECISION] Failed to get precision for ${symbol}, using default:`, error);
+      return rawQuantity.toFixed(6);
+    }
+  }
+
   private async getCurrentPrice(symbol: string): Promise<number> {
     try {
       const apiClient = Array.from(this.userSessions.values())[0]; // Use any connected client for public data
@@ -2905,8 +2934,10 @@ ${preview.maxSlippageExceeded ? '\n❌ **Max slippage exceeded**' : ''}
       return;
     }
 
-    const apiClient = this.getUserApiClient(ctx);
-    if (!apiClient) {
+    let apiClient: AsterApiClient;
+    try {
+      apiClient = await this.getOrCreateApiClient(ctx.userState.userId);
+    } catch (error) {
       await ctx.answerCbQuery('❌ API session not found');
       return;
     }
@@ -2915,9 +2946,10 @@ ${preview.maxSlippageExceeded ? '\n❌ **Max slippage exceeded**' : ''}
       const side = action.toUpperCase() as 'BUY' | 'SELL';
       const usdtAmount = parseInt(amount);
       
-      // Get current price for quantity calculation
+      // Get current price for quantity calculation with proper precision
       const currentPrice = await this.getCurrentPrice(symbol);
-      const quantity = (usdtAmount / currentPrice).toString();
+      const rawQuantity = usdtAmount / currentPrice;
+      const quantity = await this.formatQuantityWithPrecision(apiClient, symbol, rawQuantity);
 
       const order = await apiClient.createSpotOrder({
         symbol,
@@ -2937,8 +2969,28 @@ ${preview.maxSlippageExceeded ? '\n❌ **Max slippage exceeded**' : ''}
         { parse_mode: 'Markdown' }
       );
 
-    } catch (error) {
+    } catch (error: any) {
       console.error('Spot preset order error:', error);
+      
+      // Check if this is a 404 error indicating spot trading is not supported
+      if (error.code === 'NOT_FOUND' || (error.message && error.message.includes('404'))) {
+        await ctx.answerCbQuery('❌ Spot trading not supported');
+        await ctx.reply(`⚠️ **Spot Trading Not Available**\n\n` +
+          `This exchange doesn't support spot trading endpoints.\n` +
+          `Please use **Futures Trading** instead.\n\n` +
+          `🔄 Redirecting to futures interface...`);
+        
+        // Redirect to futures trading
+        setTimeout(async () => {
+          try {
+            await this.handlePerpsTradingInterface(ctx, symbol);
+          } catch (redirectError) {
+            console.error('Failed to redirect to futures:', redirectError);
+          }
+        }, 1000);
+        return;
+      }
+      
       await ctx.answerCbQuery('❌ Order failed');
       await ctx.reply(`❌ Failed to execute ${action} order for ${symbol}: ${error instanceof Error ? error.message : 'Unknown error'}`);
     }
@@ -2950,8 +3002,10 @@ ${preview.maxSlippageExceeded ? '\n❌ **Max slippage exceeded**' : ''}
       return;
     }
 
-    const apiClient = this.getUserApiClient(ctx);
-    if (!apiClient) {
+    let apiClient: AsterApiClient;
+    try {
+      apiClient = await this.getOrCreateApiClient(ctx.userState.userId);
+    } catch (error) {
       await ctx.answerCbQuery('❌ API session not found');
       return;
     }
@@ -2964,9 +3018,10 @@ ${preview.maxSlippageExceeded ? '\n❌ **Max slippage exceeded**' : ''}
       // Set leverage first
       await apiClient.changeLeverage(symbol, leverageValue);
       
-      // Get current price for quantity calculation
+      // Get current price for quantity calculation with proper precision
       const currentPrice = await this.getCurrentPrice(symbol);
-      const quantity = (usdtAmount / currentPrice).toString();
+      const rawQuantity = usdtAmount / currentPrice;
+      const quantity = await this.formatQuantityWithPrecision(apiClient, symbol, rawQuantity);
 
       const order = await apiClient.createOrder({
         symbol,
