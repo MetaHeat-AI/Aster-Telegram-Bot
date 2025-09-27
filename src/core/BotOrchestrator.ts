@@ -84,8 +84,9 @@ export class BotOrchestrator {
   private async initializePublicApiClient(): Promise<void> {
     try {
       const AsterApiClient = await import('../aster');
-      this.publicApiClient = new AsterApiClient.AsterApiClient('https://api.aster.exchange', '', '');
-      console.log('[Orchestrator] Public API client initialized');
+      // Use the same base URL as authenticated API client for consistency
+      this.publicApiClient = new AsterApiClient.AsterApiClient(this.config.aster.baseUrl, '', '');
+      console.log(`[Orchestrator] Public API client initialized with base URL: ${this.config.aster.baseUrl}`);
     } catch (error) {
       console.error('[Orchestrator] CRITICAL: Failed to initialize public API client:', error);
       throw new Error(`Failed to initialize public API client: ${error instanceof Error ? error.message : 'Unknown error'}`);
@@ -2155,12 +2156,24 @@ Contact @AsterDEX\\_Support or visit docs.aster.exchange for detailed guides.
           
           return `${index + 1}. **${symbol.replace('USDT', '')}** • $${price.toFixed(price < 1 ? 6 : 2)}\n   ${changeEmoji} ${changeText}${change24h.toFixed(2)}% • Vol: ${(volume / 1000000).toFixed(1)}M\n`;
         } catch (error) {
+          console.error(`Failed to fetch ticker for ${symbol}:`, error);
           return `${index + 1}. **${symbol.replace('USDT', '')}** • Price unavailable\n`;
         }
       });
       
-      const priceResults = await Promise.all(pricePromises);
-      priceText += priceResults.join('\n');
+      const priceResults = await Promise.allSettled(pricePromises);
+      const successfulResults = priceResults.filter(result => result.status === 'fulfilled').map(result => result.value);
+      const failedCount = priceResults.length - successfulResults.length;
+      
+      if (successfulResults.length === 0) {
+        throw new Error('Failed to fetch price data for all cryptocurrencies');
+      }
+      
+      priceText += successfulResults.join('\n');
+      
+      if (failedCount > 0) {
+        priceText += `\n\n⚠️ ${failedCount} price(s) unavailable due to API issues`;
+      }
       
       // Add clickable token buttons for quick access
       const tokenButtons = topSymbols.slice(0, 6).map(symbol => 

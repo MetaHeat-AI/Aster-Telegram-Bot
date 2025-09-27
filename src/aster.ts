@@ -362,8 +362,26 @@ export class AsterApiClient {
     volume: string;
     quoteVolume: string;
   }> {
-    const response = await this.axios.get(`/fapi/v1/ticker/24hr?symbol=${symbol}`);
-    return response.data;
+    try {
+      console.log(`[API] GET /fapi/v1/ticker/24hr?symbol=${symbol}`);
+      const response = await this.axios.get(`/fapi/v1/ticker/24hr?symbol=${symbol}`, {
+        timeout: 10000,
+        validateStatus: (status) => status < 500
+      });
+      return response.data;
+    } catch (error) {
+      console.error(`[API] Failed to get 24hr ticker for ${symbol}:`, error);
+      if (error instanceof Error) {
+        if (error.message.includes('timeout')) {
+          throw new Error(`API timeout for ${symbol} - please try again`);
+        }
+        if (error.message.includes('Network Error')) {
+          throw new Error(`Network connectivity issue for ${symbol}`);
+        }
+        throw new Error(`Ticker API failed for ${symbol}: ${error.message}`);
+      }
+      throw new Error(`Ticker API failed for ${symbol} with unknown error`);
+    }
   }
 
   async getAllFuturesTickers(): Promise<Array<{
