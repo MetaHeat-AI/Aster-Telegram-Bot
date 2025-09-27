@@ -12,19 +12,22 @@ export class NavigationHandler extends BaseHandler {
       ctx,
       async () => {
         const welcomeText = `
-🤖 **Welcome to AsterBot!**
+**Welcome to AsterBot — Your Aster Telegram Terminal**
 
-Your gateway to professional DEX trading on Aster Exchange.
+Trade Aster DEX directly on Telegram, faster, more convenient and always at your fingertips. Execute trades instantly, manage positions in real time, receive live alerts, and control your wallets without switching platforms. All powered via the official @aster_Dex API
 
-**🚀 What can I do for you?**
+• 🔒 **Secure API Execution** — Your keys, your control
+• ✅ **Spot & Perpetual Trading** — Access the full market
+• 🛡️ **Price & Slippage Protection** — Powered by Aster
+• 🦅 **Real-Time P&L & Position Tracking**
+• 💰 **Custom Trade Amounts & Natural Language Input**
+• 🔔⭐️ **One-Click Market Watch**
+• 🔥 **Zero Fees**
+• 🏆 **Earn Rewards & Points for Airdrops on the go**
 
-📈 **Trade** - Spot & Perpetual Futures
-💰 **Portfolio** - Track balances & P&L  
-📊 **Positions** - Manage open trades
-⚙️ **Setup** - Link your API keys
-📖 **Help** - Get support & guides
+⚠️ **Disclaimer:** You can always create a test wallet first to explore features.
 
-**Ready to start trading?**
+**Choose an action below to get started**
         `.trim();
 
         const keyboard = Markup.inlineKeyboard([
@@ -66,14 +69,18 @@ Your gateway to professional DEX trading on Aster Exchange.
       ctx,
       async () => {
         const menuText = `
-🏠 **Main Menu**
+🏠 **AsterBot Main Dashboard**
 
-Welcome to Aster DEX Trading Bot! Choose an option below:
+Your complete trading control center for Aster DEX. Execute professional trades, monitor your portfolio performance, and manage risk — all from Telegram.
 
-📈 **Trading** - Access spot and perpetual futures trading
-💰 **Portfolio** - View balances, positions, and P&L
-⚙️ **Setup** - Configure API keys and settings
-📖 **Help** - Get support and documentation
+**🚀 Quick Actions:**
+• **Trade** — Instant spot & futures execution with smart slippage protection
+• **Portfolio** — Real-time P&L tracking and position management  
+• **Prices** — Live market data, volume leaders, and watchlists
+• **Settings** — Configure risk limits, presets, and security features
+• **Help** — Guides, support, and feature documentation
+
+**Select your next action:**
         `.trim();
 
         const keyboard = this.getMainMenuKeyboard();
@@ -116,19 +123,28 @@ Welcome to Aster DEX Trading Bot! Choose an option below:
         }
 
         const tradeText = `
-📈 **Choose Trading Mode**
+📈 **Professional Trading Suite**
+
+Execute trades instantly with institutional-grade execution, smart slippage protection, and real-time position management. Choose your preferred trading mode below.
 
 **🏪 Spot Trading:**
-• Trade real assets (BTC, ETH, etc.)
-• No leverage, direct ownership
-• Perfect for long-term holding
+• Direct asset ownership (BTC, ETH, ASTER, etc.)
+• No liquidation risk, perfect for HODLing
+• Instant execution with best market prices
+• Custom amounts and percentage-based sizing
 
-**⚡ Perps Trading:**
-• Leveraged perpetual futures
-• Up to 125x leverage available
-• Long and short positions
+**⚡ Perpetual Futures:**
+• Leveraged trading up to 125x leverage
+• Long and short any market direction
+• Cross and isolated margin modes
+• Advanced risk management tools
 
-Select your preferred trading mode:
+**📊 Portfolio Tools:**
+• Real-time P&L tracking and analysis
+• Position management with partial closes
+• Balance monitoring across all assets
+
+**Select your action:**
         `.trim();
 
         const keyboard = Markup.inlineKeyboard([

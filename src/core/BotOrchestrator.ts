@@ -936,28 +936,36 @@ export class BotOrchestrator {
    */
   private async handleHelpCommand(ctx: BotContext): Promise<void> {
     const helpText = `
-🆘 **AsterBot Help Center**
+🆘 **AsterBot Knowledge Center**
 
-**📋 Commands:**
-• /start - Welcome & main menu
-• /menu - Show main menu
-• /trade - Quick access to trading
-• /positions - View open positions
-• /balance - Check account balance
-• /help - Show this help
+Your complete guide to professional Telegram trading with AsterBot. Learn how to maximize your trading efficiency and unlock all features.
 
-**🔗 Setup:**
-• /link - Link your API credentials
-• /unlink - Remove API credentials
-• /settings - Bot settings
+**🚀 Quick Start Guide:**
+• **/start** — Welcome and onboarding experience
+• **/link** — Securely connect your Aster DEX API credentials
+• **/trade** — Access the professional trading suite
+• **/price** — Live market intelligence and price tracking
 
-**📈 Trading:**
-• Use buttons for easy trading
-• Supports spot & perpetual futures
-• Real-time P&L tracking
+**📈 Advanced Commands:**
+• **/positions** — Real-time portfolio and position management
+• **/balance** — Multi-asset balance overview and analysis
+• **/settings** — Customize risk management and trading presets
+• **/menu** — Return to main dashboard anytime
 
-**🆘 Support:**
-If you need help, contact support or check the documentation.
+**🔧 Trading Features:**
+• **Smart Execution** — Automatic slippage protection and optimal fills
+• **Leverage Trading** — Up to 125x leverage with advanced risk controls
+• **Natural Language** — Type amounts like "$100", "50%", or "0.1 BTC"
+• **One-Click Management** — Partial closes, position sizing, and quick trades
+
+**🛡️ Security & Safety:**
+• Your API keys are encrypted and stored locally
+• PIN protection for sensitive operations
+• Daily loss caps and leverage limits
+• Real-time risk monitoring
+
+**📞 Need More Help?**
+Contact @AsterDEX_Support or visit docs.aster.exchange for detailed guides.
     `.trim();
 
     await ctx.reply(helpText, { parse_mode: 'Markdown' });
@@ -1593,20 +1601,23 @@ If you need help, contact support or check the documentation.
       const userId = ctx.userState.userId;
       const userSettings = await settingsManager.getUserSettings(userId);
       
-      let settingsText = '⚙️ **Bot Settings**\n\n';
+      let settingsText = '⚙️ **Trading Configuration Center**\n\n';
+      settingsText += 'Customize your trading experience with professional risk management tools, security features, and personalized presets. Optimize your workflow and protect your capital.\n\n';
       
       // Display current settings
+      settingsText += `**🔧 Current Configuration:**\n`;
       settingsText += `🎯 **Leverage Cap:** ${userSettings.leverage_cap}x\n`;
       settingsText += `💰 **Default Leverage:** ${userSettings.default_leverage}x\n`;
       settingsText += `📊 **Slippage Tolerance:** ${(userSettings.slippage_bps / 100).toFixed(2)}%\n`;
       settingsText += `🛡️ **Daily Loss Cap:** ${userSettings.daily_loss_cap ? '$' + userSettings.daily_loss_cap : 'None'}\n`;
       settingsText += `🔒 **PIN Protection:** ${userSettings.pin_hash ? 'Enabled' : 'Disabled'}\n\n`;
       
-      settingsText += '🔧 **Available Settings:**\n';
-      settingsText += '• Leverage limits for safety\n';
-      settingsText += '• Default trade sizes\n';
-      settingsText += '• Risk management settings\n';
-      settingsText += '• Security preferences\n';
+      settingsText += '**🚀 Customization Options:**\n';
+      settingsText += '• **Risk Management** — Set leverage limits and loss caps\n';
+      settingsText += '• **Trade Presets** — Configure default sizes and quick amounts\n';
+      settingsText += '• **Slippage Control** — Fine-tune execution tolerance\n';
+      settingsText += '• **Security Features** — PIN protection and wallet safety\n\n';
+      settingsText += '**Select a category to configure:**';
       
       const keyboard = Markup.inlineKeyboard([
         [
@@ -1819,16 +1830,26 @@ If you need help, contact support or check the documentation.
   private async handlePriceMenu(ctx: BotContext): Promise<void> {
     try {
       const priceText = [
-        '📊 **Price Tracking Center**',
+        '📊 **Live Market Intelligence Center**',
         '',
-        '🎯 **Quick Access:**',
-        '• View top cryptocurrencies by market cap',
-        '• Check highest volume trading pairs',
-        '• Compare multiple token prices',
-        '• Track your watchlist assets',
-        '• View all available markets',
+        'Real-time market data, price analysis, and trading insights powered by Aster DEX. Track market leaders, monitor volume surges, and discover trending opportunities.',
         '',
-        '💡 Select an option below to get started:'
+        '**🏆 Market Leaders:**',
+        '• Top cryptocurrencies by market capitalization',
+        '• Most liquid and established trading pairs',
+        '• Click any token for detailed analysis',
+        '',
+        '**📈 Volume Analytics:**',
+        '• Highest volume pairs with momentum indicators',
+        '• Real-time trading activity and price movements',
+        '• Identify market hotspots and trends',
+        '',
+        '**⭐ Smart Features:**',
+        '• Curated watchlist of key assets',
+        '• Multi-token price comparison tools',
+        '• Complete market overview and discovery',
+        '',
+        '**Choose your market analysis:**'
       ].join('\n');
 
       const keyboard = Markup.inlineKeyboard([
