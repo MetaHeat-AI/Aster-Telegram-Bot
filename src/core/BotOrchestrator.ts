@@ -686,7 +686,7 @@ export class BotOrchestrator {
    * Setup text handlers
    */
   private setupTextHandlers(): void {
-    this.bot.on('text', (ctx) => {
+    this.bot.on('text', async (ctx) => {
       // Handle conversation states and natural language commands
       console.log(`[Text] Received: ${ctx.message.text} from user ${ctx.userState?.userId}`);
       console.log(`[Text] Conversation state: ${ctx.userState?.conversationState?.step || 'none'}`);
