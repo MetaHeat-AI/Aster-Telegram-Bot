@@ -809,37 +809,14 @@ export class BotOrchestrator {
   }
 
   /**
-   * Safely edit message text with smart fallback logic
-   * Prefers new messages to keep updates visible at bottom of chat
+   * Always send new messages instead of editing (except for the most recent message)
+   * This ensures all updates are visible at bottom of chat for better UX
    */
   private async safeEditMessageText(ctx: BotContext, text: string, options: any): Promise<void> {
-    // Check if message is recent (less than 30 seconds old)
-    const messageAge = ctx.callbackQuery?.message?.date ? 
-      (Date.now() / 1000) - ctx.callbackQuery.message.date : 0;
-    
-    const isRecentMessage = messageAge < 30; // 30 seconds threshold
-    
     try {
-      if (isRecentMessage) {
-        // Try editing recent messages for smoother UX
-        try {
-          await ctx.editMessageText(text, options);
-          return;
-        } catch (editError: any) {
-          if (editError.description?.includes("message can't be edited")) {
-            console.log('[Bot] Message too old to edit, sending new message');
-          } else {
-            throw editError;
-          }
-        }
-      }
-      
-      // For older messages or edit failures, send new message
-      // This ensures updates are always visible at bottom of chat
-      
-      // Add a small indicator that this is an updated message
-      const updatedText = text + '\n\n🔄 *Updated*';
-      await ctx.reply(updatedText, options);
+      // Always send new message to keep updates visible at bottom of chat
+      // This prevents users from missing updates buried in chat history
+      await ctx.reply(text, options);
       
     } catch (error: any) {
       console.error('[Bot] Failed to send message:', error);
