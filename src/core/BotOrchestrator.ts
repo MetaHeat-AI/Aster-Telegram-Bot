@@ -2164,7 +2164,7 @@ Contact @AsterDEX\\_Support or visit docs.aster.exchange for detailed guides.
         'SOLUSDT', 'DOTUSDT', 'LINKUSDT', 'AVAXUSDT', 'MATICUSDT'
       ];
       
-      let priceText = '🏆 **Top Market Cap Cryptocurrencies**\n\n';
+      let priceText = '🏆 **Top Market Cap Cryptocurrencies**\n💰 *Current Price • 24h Change (USD) • High/Low • Volume*\n\n';
       
       const pricePromises = topSymbols.map(async (symbol, index) => {
         try {
@@ -2172,13 +2172,32 @@ Contact @AsterDEX\\_Support or visit docs.aster.exchange for detailed guides.
           const price = parseFloat(ticker.lastPrice);
           const change24h = parseFloat(ticker.priceChangePercent);
           const volume = parseFloat(ticker.volume);
+          const high24h = parseFloat(ticker.highPrice);
+          const low24h = parseFloat(ticker.lowPrice);
+          const openPrice = parseFloat(ticker.openPrice);
+          
           const changeEmoji = change24h >= 0 ? '🟢' : '🔴';
           const changeText = change24h >= 0 ? '+' : '';
           
-          return `${index + 1}. **${symbol.replace('USDT', '')}** • $${price.toFixed(price < 1 ? 6 : 2)}\n   ${changeEmoji} ${changeText}${change24h.toFixed(2)}% • Vol: ${(volume / 1000000).toFixed(1)}M\n`;
+          // Format price based on value
+          const formattedPrice = price < 1 ? price.toFixed(6) : price < 100 ? price.toFixed(4) : price.toFixed(2);
+          
+          // Calculate price change in USD
+          const priceChange = price - openPrice;
+          const formattedPriceChange = Math.abs(priceChange) < 0.01 ? 
+            priceChange.toFixed(6) : priceChange.toFixed(2);
+          
+          // Format volume in appropriate units
+          const volumeText = volume > 1000000 ? 
+            `${(volume / 1000000).toFixed(1)}M` : 
+            volume > 1000 ? `${(volume / 1000).toFixed(1)}K` : volume.toFixed(0);
+          
+          return `${index + 1}. **${symbol.replace('USDT', '')}**\n` +
+                 `   💰 **$${formattedPrice}** ${changeEmoji} ${changeText}${change24h.toFixed(2)}% (${changeText}$${formattedPriceChange})\n` +
+                 `   📊 H: $${high24h.toFixed(price < 1 ? 6 : 2)} • L: $${low24h.toFixed(price < 1 ? 6 : 2)} • Vol: ${volumeText}\n`;
         } catch (error) {
           console.error(`Failed to fetch ticker for ${symbol}:`, error);
-          return `${index + 1}. **${symbol.replace('USDT', '')}** • Price unavailable\n`;
+          return `${index + 1}. **${symbol.replace('USDT', '')}** • ❌ Price unavailable\n`;
         }
       });
       
@@ -2247,18 +2266,56 @@ Contact @AsterDEX\\_Support or visit docs.aster.exchange for detailed guides.
         throw new Error('No USDT trading pairs found in ticker data');
       }
       
-      let volumeText = '📈 **Highest Volume Trading Pairs (24h)**\n\n';
+      let volumeText = '📈 **Highest Volume Trading Pairs (24h)**\n💰 *Current Price • 24h Change (USD) • High/Low • Volume*\n\n';
       
-      topByVolume.forEach((ticker: any, index: number) => {
-        const price = parseFloat(ticker.lastPrice);
-        const change24h = parseFloat(ticker.priceChangePercent);
-        const changeEmoji = change24h >= 0 ? '🟢' : '🔴';
-        const changeText = change24h >= 0 ? '+' : '';
-        const volume = (parseFloat(ticker.volume) / 1000000).toFixed(1); // Convert to millions
-        
-        volumeText += `${index + 1}. **${ticker.symbol.replace('USDT', '')}** • $${price.toFixed(price < 1 ? 6 : 2)}\n`;
-        volumeText += `   ${changeEmoji} ${changeText}${change24h.toFixed(2)}% • Vol: ${volume}M USDT\n\n`;
+      // Get detailed ticker data for each top volume symbol
+      const detailedTickerPromises = topByVolume.slice(0, 10).map(async (ticker: any, index: number) => {
+        try {
+          const detailedTicker = await this.publicApiClient.get24hrTicker(ticker.symbol);
+          const price = parseFloat(detailedTicker.lastPrice);
+          const change24h = parseFloat(detailedTicker.priceChangePercent);
+          const volume = parseFloat(detailedTicker.volume);
+          const high24h = parseFloat(detailedTicker.highPrice);
+          const low24h = parseFloat(detailedTicker.lowPrice);
+          const openPrice = parseFloat(detailedTicker.openPrice);
+          
+          const changeEmoji = change24h >= 0 ? '🟢' : '🔴';
+          const changeText = change24h >= 0 ? '+' : '';
+          
+          // Format price based on value
+          const formattedPrice = price < 1 ? price.toFixed(6) : price < 100 ? price.toFixed(4) : price.toFixed(2);
+          
+          // Calculate price change in USD
+          const priceChange = price - openPrice;
+          const formattedPriceChange = Math.abs(priceChange) < 0.01 ? 
+            priceChange.toFixed(6) : priceChange.toFixed(2);
+          
+          // Format volume in appropriate units
+          const volumeText = volume > 1000000 ? 
+            `${(volume / 1000000).toFixed(1)}M` : 
+            volume > 1000 ? `${(volume / 1000).toFixed(1)}K` : volume.toFixed(0);
+          
+          return `${index + 1}. **${ticker.symbol.replace('USDT', '')}**\n` +
+                 `   💰 **$${formattedPrice}** ${changeEmoji} ${changeText}${change24h.toFixed(2)}% (${changeText}$${formattedPriceChange})\n` +
+                 `   📊 H: $${high24h.toFixed(price < 1 ? 6 : 2)} • L: $${low24h.toFixed(price < 1 ? 6 : 2)} • Vol: ${volumeText}\n`;
+        } catch (error) {
+          console.error(`Failed to fetch detailed ticker for ${ticker.symbol}:`, error);
+          // Fallback to basic data from getAllFuturesTickers
+          const price = parseFloat(ticker.lastPrice);
+          const change24h = parseFloat(ticker.priceChangePercent);
+          const changeEmoji = change24h >= 0 ? '🟢' : '🔴';
+          const changeText = change24h >= 0 ? '+' : '';
+          const volume = (parseFloat(ticker.volume) / 1000000).toFixed(1);
+          
+          return `${index + 1}. **${ticker.symbol.replace('USDT', '')}** • $${price.toFixed(price < 1 ? 6 : 2)}\n` +
+                 `   ${changeEmoji} ${changeText}${change24h.toFixed(2)}% • Vol: ${volume}M\n`;
+        }
       });
+      
+      const detailedResults = await Promise.allSettled(detailedTickerPromises);
+      const successfulDetailedResults = detailedResults.filter(result => result.status === 'fulfilled').map(result => result.value);
+      
+      volumeText += successfulDetailedResults.join('\n');
       
       // Add clickable buttons for top volume tokens
       const topTokenButtons = topByVolume.slice(0, 6).map((ticker: any) => 
