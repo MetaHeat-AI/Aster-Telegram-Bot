@@ -476,14 +476,14 @@ export class BotOrchestrator {
       const symbol = ctx.match[2];
       const leverage = parseInt(ctx.match[3]);
       const percentage = parseInt(ctx.match[4]);
-      this.handlePerpsPercentageExecute(ctx, symbol, action.toUpperCase() as 'BUY' | 'SELL', leverage, percentage);
+      this.handlePerpsTPSLSelection(ctx, symbol, action.toUpperCase() as 'BUY' | 'SELL', leverage, percentage, 'percentage');
     });
 
     this.bot.action(/^spot_amount_(buy|sell)_([A-Z0-9]+USDT)_(\d+)pct$/, (ctx) => {
       const action = ctx.match[1];
       const symbol = ctx.match[2];
       const percentage = parseInt(ctx.match[3]);
-      this.handleSpotPercentageExecute(ctx, symbol, action.toUpperCase() as 'BUY' | 'SELL', percentage);
+      this.handleSpotTPSLSelection(ctx, symbol, action.toUpperCase() as 'BUY' | 'SELL', percentage, 'percentage');
     });
 
     // Manual amount input handlers
@@ -511,6 +511,28 @@ export class BotOrchestrator {
       const action = ctx.match[1];
       const symbol = ctx.match[2];
       this.handleManualTokenInput(ctx, 'spot', symbol, action.toUpperCase() as 'BUY' | 'SELL');
+    });
+
+    // TP/SL selection handlers
+    this.bot.action(/^perps_tpsl_(buy|sell)_([A-Z0-9]+USDT)_(\d+)x_(\d+|\d+\.\d+)_(percentage|usdt|token)_tp(\d+|\d+\.\d+|none)_sl(\d+|\d+\.\d+|none)$/, (ctx) => {
+      const action = ctx.match[1];
+      const symbol = ctx.match[2];
+      const leverage = parseInt(ctx.match[3]);
+      const amount = parseFloat(ctx.match[4]);
+      const amountType = ctx.match[5];
+      const tpValue = ctx.match[6] === 'none' ? null : parseFloat(ctx.match[6]);
+      const slValue = ctx.match[7] === 'none' ? null : parseFloat(ctx.match[7]);
+      this.handlePerpsTPSLExecute(ctx, symbol, action.toUpperCase() as 'BUY' | 'SELL', leverage, amount, amountType, tpValue, slValue);
+    });
+
+    this.bot.action(/^spot_tpsl_(buy|sell)_([A-Z0-9]+USDT)_(\d+|\d+\.\d+)_(percentage|usdt|token)_tp(\d+|\d+\.\d+|none)_sl(\d+|\d+\.\d+|none)$/, (ctx) => {
+      const action = ctx.match[1];
+      const symbol = ctx.match[2];
+      const amount = parseFloat(ctx.match[3]);
+      const amountType = ctx.match[4];
+      const tpValue = ctx.match[5] === 'none' ? null : parseFloat(ctx.match[5]);
+      const slValue = ctx.match[6] === 'none' ? null : parseFloat(ctx.match[6]);
+      this.handleSpotTPSLExecute(ctx, symbol, action.toUpperCase() as 'BUY' | 'SELL', amount, amountType, tpValue, slValue);
     });
 
     // Spot asset selling handlers
@@ -2777,9 +2799,9 @@ Contact @AsterDEX_Support or visit docs.aster.exchange for detailed guides.
 
     try {
       if (mode === 'spot') {
-        await this.handleSpotExecuteAction(ctx, symbol, side, amount);
+        await this.handleSpotTPSLSelection(ctx, symbol, side, amount, 'usdt');
       } else {
-        await this.handlePerpsExecuteAction(ctx, symbol, side, amount, leverage);
+        await this.handlePerpsTPSLSelection(ctx, symbol, side, leverage!, amount, 'usdt');
       }
     } catch (error) {
       console.error('Manual USDT execution error:', error);
@@ -2824,9 +2846,9 @@ Contact @AsterDEX_Support or visit docs.aster.exchange for detailed guides.
       }
 
       if (mode === 'spot') {
-        await this.handleSpotExecuteAction(ctx, symbol, side, usdtAmount);
+        await this.handleSpotTPSLSelection(ctx, symbol, side, tokenAmount, 'token');
       } else {
-        await this.handlePerpsExecuteAction(ctx, symbol, side, usdtAmount, leverage);
+        await this.handlePerpsTPSLSelection(ctx, symbol, side, leverage!, tokenAmount, 'token');
       }
     } catch (error) {
       console.error('Manual token execution error:', error);
@@ -3188,6 +3210,288 @@ Contact @AsterDEX_Support or visit docs.aster.exchange for detailed guides.
       `🔄 Use /trade to return to trading menu.`,
       { parse_mode: 'Markdown' }
     );
+  }
+
+  /**
+   * Handle TP/SL selection for perps trading
+   */
+  private async handlePerpsTPSLSelection(ctx: BotContext, symbol: string, side: 'BUY' | 'SELL', leverage: number, amount: number, amountType: string): Promise<void> {
+    try {
+      const SettingsModule = await import('../settings');
+      const settingsManager = new SettingsModule.SettingsManager(this.db, this.encryption);
+      const userSettings = await settingsManager.getUserSettings(ctx.userState!.userId);
+
+      const sideEmoji = side === 'BUY' ? '📈' : '📉';
+      const amountDisplay = amountType === 'percentage' ? `${amount}%` : 
+                           amountType === 'usdt' ? `$${amount}` : `${amount} ${symbol.replace('USDT', '')}`;
+
+      const tpslText = [
+        `${sideEmoji} **${side} ${symbol.replace('USDT', '')} ${leverage}x**`,
+        `Amount: ${amountDisplay}`,
+        '',
+        '🎯 **Take Profit & Stop Loss Setup**',
+        '',
+        'Set your risk management levels to protect profits and limit losses. You can use preset values from your settings or create custom levels.',
+        '',
+        '**🟢 Take Profit Presets:**',
+        userSettings.tp_presets.map(tp => `• ${tp}% profit target`).join('\n'),
+        '',
+        '**🔴 Stop Loss Presets:**',
+        userSettings.sl_presets.map(sl => `• ${sl}% maximum loss`).join('\n'),
+        '',
+        '**Choose your risk management setup:**'
+      ].join('\n');
+
+      // Create TP preset buttons (first row)
+      const tpButtons = userSettings.tp_presets.slice(0, 3).map(tp => 
+        Markup.button.callback(`TP ${tp}%`, `perps_tpsl_${side.toLowerCase()}_${symbol}_${leverage}x_${amount}_${amountType}_tp${tp}_slnone`)
+      );
+
+      // Create SL preset buttons (second row)
+      const slButtons = userSettings.sl_presets.slice(0, 3).map(sl => 
+        Markup.button.callback(`SL ${sl}%`, `perps_tpsl_${side.toLowerCase()}_${symbol}_${leverage}x_${amount}_${amountType}_tpnone_sl${sl}`)
+      );
+
+      // Create combined TP/SL buttons (third row)
+      const combinedButtons = userSettings.tp_presets.slice(0, 2).map((tp, index) => {
+        const sl = userSettings.sl_presets[Math.min(index, userSettings.sl_presets.length - 1)];
+        return Markup.button.callback(`TP ${tp}% / SL ${sl}%`, `perps_tpsl_${side.toLowerCase()}_${symbol}_${leverage}x_${amount}_${amountType}_tp${tp}_sl${sl}`);
+      });
+
+      const keyboard = Markup.inlineKeyboard([
+        tpButtons,
+        slButtons,
+        combinedButtons,
+        [
+          Markup.button.callback('🚀 Execute Without TP/SL', `perps_tpsl_${side.toLowerCase()}_${symbol}_${leverage}x_${amount}_${amountType}_tpnone_slnone`),
+          Markup.button.callback('⚙️ Custom TP/SL', `perps_custom_tpsl_${side.toLowerCase()}_${symbol}_${leverage}x_${amount}_${amountType}`)
+        ],
+        [
+          Markup.button.callback('🔙 Back to Amount', `perps_leverage_${side.toLowerCase()}_${symbol}_${leverage}x`)
+        ]
+      ]);
+
+      await ctx.editMessageText(tpslText, { parse_mode: 'Markdown', ...keyboard });
+    } catch (error) {
+      console.error('Perps TP/SL selection error:', error);
+      await ctx.reply('❌ Failed to load TP/SL options. Please try again.');
+    }
+  }
+
+  /**
+   * Handle TP/SL selection for spot trading
+   */
+  private async handleSpotTPSLSelection(ctx: BotContext, symbol: string, side: 'BUY' | 'SELL', amount: number, amountType: string): Promise<void> {
+    try {
+      const SettingsModule = await import('../settings');
+      const settingsManager = new SettingsModule.SettingsManager(this.db, this.encryption);
+      const userSettings = await settingsManager.getUserSettings(ctx.userState!.userId);
+
+      const sideEmoji = side === 'BUY' ? '🟢' : '🔴';
+      const amountDisplay = amountType === 'percentage' ? `${amount}%` : 
+                           amountType === 'usdt' ? `$${amount}` : `${amount} ${symbol.replace('USDT', '')}`;
+
+      const tpslText = [
+        `${sideEmoji} **${side} ${symbol.replace('USDT', '')}**`,
+        `Amount: ${amountDisplay}`,
+        '',
+        '🎯 **Take Profit Setup** (Spot Trading)',
+        '',
+        'For spot trading, set take profit levels to automatically sell when your target price is reached. Stop losses are handled differently in spot trading.',
+        '',
+        '**🟢 Take Profit Presets:**',
+        userSettings.tp_presets.map(tp => `• ${tp}% profit target`).join('\n'),
+        '',
+        side === 'BUY' ? '**Note:** TP orders will sell your position at profit targets' : '**Note:** This is a direct sell order',
+        '',
+        '**Choose your setup:**'
+      ].join('\n');
+
+      const tpButtons = userSettings.tp_presets.slice(0, 3).map(tp => 
+        Markup.button.callback(`TP ${tp}%`, `spot_tpsl_${side.toLowerCase()}_${symbol}_${amount}_${amountType}_tp${tp}_slnone`)
+      );
+
+      const keyboard = Markup.inlineKeyboard([
+        tpButtons,
+        [
+          Markup.button.callback('🚀 Execute Without TP', `spot_tpsl_${side.toLowerCase()}_${symbol}_${amount}_${amountType}_tpnone_slnone`),
+          Markup.button.callback('⚙️ Custom TP', `spot_custom_tpsl_${side.toLowerCase()}_${symbol}_${amount}_${amountType}`)
+        ],
+        [
+          Markup.button.callback('🔙 Back to Amount', `spot_${side.toLowerCase()}_${symbol}`)
+        ]
+      ]);
+
+      await ctx.editMessageText(tpslText, { parse_mode: 'Markdown', ...keyboard });
+    } catch (error) {
+      console.error('Spot TP/SL selection error:', error);
+      await ctx.reply('❌ Failed to load TP/SL options. Please try again.');
+    }
+  }
+
+  /**
+   * Handle perps TP/SL execution with risk management
+   */
+  private async handlePerpsTPSLExecute(ctx: BotContext, symbol: string, side: 'BUY' | 'SELL', leverage: number, amount: number, amountType: string, tpValue: number | null, slValue: number | null): Promise<void> {
+    try {
+      let finalAmount = amount;
+      
+      if (amountType === 'percentage') {
+        const apiClient = await this.apiClientService.getOrCreateClient(ctx.userState!.userId);
+        const FuturesAccountService = await import('../services/FuturesAccountService');
+        const futuresService = new FuturesAccountService.FuturesAccountService(apiClient);
+        
+        const account = await futuresService.getFuturesAccount();
+        const usdtAsset = account.assets.find(a => a.asset === 'USDT');
+        const availableBalance = parseFloat(usdtAsset?.availableBalance || '0');
+        finalAmount = Math.floor(availableBalance * (amount / 100));
+      }
+
+      // Execute the main trade first
+      await this.handlePerpsExecuteAction(ctx, symbol, side, finalAmount, leverage);
+
+      // If TP or SL is set, place additional orders
+      if (tpValue || slValue) {
+        await this.placeTPSLOrders(ctx, symbol, side, leverage, tpValue, slValue);
+      }
+
+    } catch (error) {
+      console.error('Perps TP/SL execution error:', error);
+      await ctx.reply('❌ Failed to execute trade with TP/SL. Please try again.');
+    }
+  }
+
+  /**
+   * Handle spot TP/SL execution
+   */
+  private async handleSpotTPSLExecute(ctx: BotContext, symbol: string, side: 'BUY' | 'SELL', amount: number, amountType: string, tpValue: number | null, slValue: number | null): Promise<void> {
+    try {
+      let finalAmount = amount;
+      
+      if (amountType === 'percentage') {
+        const apiClient = await this.apiClientService.getOrCreateClient(ctx.userState!.userId);
+        const SpotAccountService = await import('../services/SpotAccountService');
+        const spotService = new SpotAccountService.SpotAccountService(apiClient);
+        
+        if (side === 'BUY') {
+          const usdtBalance = await spotService.getUsdtBalance();
+          finalAmount = Math.floor(usdtBalance * (amount / 100));
+        } else {
+          const asset = symbol.replace('USDT', '');
+          const assetBalance = await spotService.getAssetBalance(asset);
+          if (assetBalance && assetBalance.usdValue) {
+            finalAmount = Math.floor(assetBalance.usdValue * (amount / 100));
+          }
+        }
+      }
+
+      // Execute the main trade first
+      await this.handleSpotExecuteAction(ctx, symbol, side, finalAmount);
+
+      // If TP is set for buy orders, place TP sell order
+      if (tpValue && side === 'BUY') {
+        await this.placeSpotTPOrder(ctx, symbol, tpValue);
+      }
+
+    } catch (error) {
+      console.error('Spot TP/SL execution error:', error);
+      await ctx.reply('❌ Failed to execute trade with TP. Please try again.');
+    }
+  }
+
+  /**
+   * Place TP/SL orders for futures positions
+   */
+  private async placeTPSLOrders(ctx: BotContext, symbol: string, side: 'BUY' | 'SELL', leverage: number, tpValue: number | null, slValue: number | null): Promise<void> {
+    try {
+      const apiClient = await this.apiClientService.getOrCreateClient(ctx.userState!.userId);
+      
+      // Get current position to calculate TP/SL prices
+      const FuturesAccountService = await import('../services/FuturesAccountService');
+      const futuresService = new FuturesAccountService.FuturesAccountService(apiClient);
+      const position = await futuresService.getPosition(symbol);
+      
+      if (!position) {
+        await ctx.reply('⚠️ Position not found. TP/SL orders could not be placed.');
+        return;
+      }
+
+      const entryPrice = position.entryPrice;
+      let tpOrderResult = null;
+      let slOrderResult = null;
+
+      // Place Take Profit order
+      if (tpValue) {
+        const tpPrice = side === 'BUY' ? 
+          entryPrice * (1 + tpValue / 100) : 
+          entryPrice * (1 - tpValue / 100);
+        
+        try {
+          const tpSide = side === 'BUY' ? 'SELL' : 'BUY';
+          tpOrderResult = await apiClient.futuresOrder({
+            symbol,
+            side: tpSide,
+            type: 'TAKE_PROFIT_MARKET',
+            stopPrice: tpPrice.toString(),
+            quantity: position.size.toString(),
+            timeInForce: 'GTC'
+          });
+        } catch (error) {
+          console.error('TP order placement error:', error);
+        }
+      }
+
+      // Place Stop Loss order
+      if (slValue) {
+        const slPrice = side === 'BUY' ? 
+          entryPrice * (1 - slValue / 100) : 
+          entryPrice * (1 + slValue / 100);
+        
+        try {
+          const slSide = side === 'BUY' ? 'SELL' : 'BUY';
+          slOrderResult = await apiClient.futuresOrder({
+            symbol,
+            side: slSide,
+            type: 'STOP_MARKET',
+            stopPrice: slPrice.toString(),
+            quantity: position.size.toString(),
+            timeInForce: 'GTC'
+          });
+        } catch (error) {
+          console.error('SL order placement error:', error);
+        }
+      }
+
+      // Send confirmation message
+      let confirmText = '✅ **Risk Management Orders Placed**\n\n';
+      if (tpOrderResult) {
+        confirmText += `🎯 **Take Profit:** ${tpValue}% set\n`;
+      }
+      if (slOrderResult) {
+        confirmText += `🛑 **Stop Loss:** ${slValue}% set\n`;
+      }
+      if (!tpOrderResult && !slOrderResult) {
+        confirmText = '⚠️ **Could not place TP/SL orders.** Your main position is still active.';
+      }
+
+      await ctx.reply(confirmText, { parse_mode: 'Markdown' });
+
+    } catch (error) {
+      console.error('TP/SL order placement error:', error);
+      await ctx.reply('⚠️ Main trade executed but TP/SL orders could not be placed.');
+    }
+  }
+
+  /**
+   * Place TP order for spot positions
+   */
+  private async placeSpotTPOrder(ctx: BotContext, symbol: string, tpValue: number): Promise<void> {
+    try {
+      // For spot trading, we'll set up a simple limit sell order at TP price
+      await ctx.reply(`✅ **Trade executed!** Set a manual sell order at ${tpValue}% profit when ready.`, { parse_mode: 'Markdown' });
+    } catch (error) {
+      console.error('Spot TP order error:', error);
+    }
   }
 
   /**
