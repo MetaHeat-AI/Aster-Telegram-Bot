@@ -4686,9 +4686,45 @@ Contact @AsterDEX\\_Support or visit docs.aster.exchange for detailed guides.
           emoji = '⚡➡️🏪';
         }
       } else {
-        fromAccount = direction === 'spot_to_futures' ? 'Spot' : 'Futures';
-        toAccount = direction === 'spot_to_futures' ? 'Futures' : 'Spot';
-        emoji = direction === 'spot_to_futures' ? '🏪➡️⚡' : '⚡➡️🏪';
+        // For manual amounts, we need to validate balance first
+        if (direction === 'spot_to_futures') {
+          const SpotAccountService = await import('../services/SpotAccountService');
+          const spotService = new SpotAccountService.SpotAccountService(apiClient);
+          const availableBalance = await spotService.getUsdtBalance();
+          
+          if (amount > availableBalance) {
+            await ctx.reply(
+              `❌ **Insufficient Balance**\n\n` +
+              `💰 **Available:** $${availableBalance.toFixed(2)} USDT\n` +
+              `💸 **Requested:** $${amount.toFixed(2)} USDT\n\n` +
+              `Please enter a smaller amount or transfer funds to your Spot account first.`,
+              { parse_mode: 'Markdown' }
+            );
+            return;
+          }
+          fromAccount = 'Spot';
+          toAccount = 'Futures';
+          emoji = '🏪➡️⚡';
+        } else {
+          const FuturesAccountService = await import('../services/FuturesAccountService');
+          const futuresService = new FuturesAccountService.FuturesAccountService(apiClient);
+          const account = await futuresService.getFuturesAccount();
+          const availableBalance = parseFloat(account.assets.find(a => a.asset === 'USDT')?.availableBalance || '0');
+          
+          if (amount > availableBalance) {
+            await ctx.reply(
+              `❌ **Insufficient Balance**\n\n` +
+              `💰 **Available:** $${availableBalance.toFixed(2)} USDT\n` +
+              `💸 **Requested:** $${amount.toFixed(2)} USDT\n\n` +
+              `Please enter a smaller amount or ensure you have sufficient funds in your Futures account.`,
+              { parse_mode: 'Markdown' }
+            );
+            return;
+          }
+          fromAccount = 'Futures';
+          toAccount = 'Spot';
+          emoji = '⚡➡️🏪';
+        }
       }
 
       if (finalAmount < 1) {
@@ -4699,19 +4735,54 @@ Contact @AsterDEX\\_Support or visit docs.aster.exchange for detailed guides.
       // Execute the transfer
       const transferType = direction === 'spot_to_futures' ? 'MAIN_UMFUTURE' : 'UMFUTURE_MAIN';
       
-      // Note: Transfer functionality not implemented yet
-      await ctx.editMessageText('⚠️ Transfer functionality is not yet implemented in this version.');
-      return;
+      // Show transfer in progress
+      await this.safeEditMessageText(ctx, 
+        `⏳ **Processing Transfer**\n\n${emoji} **${fromAccount} → ${toAccount}**\n\n💰 **Amount:** $${finalAmount.toFixed(2)} USDT\n\n⏳ *Please wait while we process your transfer...*`,
+        { parse_mode: 'Markdown' }
+      );
       
-      /* TODO: Implement transfer functionality
-      const result = await apiClient.transfer({
+      const result = await apiClient.universalTransfer({
         type: transferType,
         asset: 'USDT',
         amount: finalAmount.toString()
       });
 
-      // TODO: Add success handling when transfer is implemented
-      */
+      // Transfer successful
+      const successText = [
+        `✅ **Transfer Completed Successfully**`,
+        '',
+        `${emoji} **${fromAccount} → ${toAccount}**`,
+        `💰 **Amount:** $${finalAmount.toFixed(2)} USDT`,
+        `🆔 **Transaction ID:** ${result.tranId}`,
+        `⏰ **Time:** ${new Date().toLocaleString()}`,
+        '',
+        '✨ *Funds are now available in your destination account.*'
+      ].join('\n');
+
+      const keyboard = Markup.inlineKeyboard([
+        [
+          Markup.button.callback('💰 View Balances', 'transfer_menu'),
+          Markup.button.callback('🔄 Transfer Again', 'transfer_menu')
+        ],
+        [
+          Markup.button.callback('🏠 Main Menu', 'main_menu')
+        ]
+      ]);
+
+      await ctx.reply(successText, { parse_mode: 'Markdown', ...keyboard });
+
+      // Emit transfer event
+      this.eventEmitter.emitEvent({
+        type: EventTypes.TRADE_EXECUTED,
+        timestamp: new Date(),
+        userId: ctx.userState!.userId,
+        telegramId: ctx.userState!.telegramId,
+        correlationId: ctx.correlationId,
+        symbol: 'USDT',
+        action: 'TRANSFER',
+        amount: finalAmount.toString(),
+        orderId: result.tranId
+      });
 
     } catch (error) {
       console.error('Transfer execution error:', error);

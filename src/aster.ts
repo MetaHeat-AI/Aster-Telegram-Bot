@@ -352,6 +352,33 @@ export class AsterApiClient {
     return this.createOrder(orderParams);
   }
 
+  async universalTransfer(params: {
+    type: 'MAIN_UMFUTURE' | 'UMFUTURE_MAIN';
+    asset: string;
+    amount: string;
+  }): Promise<{
+    tranId: number;
+  }> {
+    const requestParams = {
+      type: params.type,
+      asset: params.asset,
+      amount: params.amount,
+    };
+
+    const signedRequest = AsterSigner.signPostRequest('/sapi/v1/asset/transfer', requestParams, this.apiSecret);
+    
+    // Use the same query string that was signed to ensure consistency
+    const formData = new URLSearchParams(signedRequest.queryString);
+
+    console.log(`[API] POST /sapi/v1/asset/transfer - ${params.type}: ${params.amount} ${params.asset}`);
+    const response = await this.axios.post('/sapi/v1/asset/transfer', formData, {
+      headers: {
+        'Content-Type': 'application/x-www-form-urlencoded',
+      },
+    });
+
+    return response.data;
+  }
 
   async get24hrTicker(symbol: string): Promise<{ 
     lastPrice: string; 
