@@ -738,37 +738,54 @@ export class BotOrchestrator {
       }
 
       // Setup webhook endpoint with Telegraf's built-in Express integration
+      const webhookDomain = new URL(this.config.webhook.url).origin;
       this.server.use(await this.bot.createWebhook({
-        domain: this.config.webhook.url.replace('/webhook', ''),
+        domain: webhookDomain,
         path: this.config.webhook.path,
         secret_token: this.config.webhook.secretToken
       }));
       console.log(`[Server] ✅ Webhook endpoint created at ${this.config.webhook.path}`);
 
-      // Set webhook with retry logic for rate limiting
-      let retries = 3;
-      while (retries > 0) {
-        try {
-          await this.bot.telegram.setWebhook(this.config.webhook.url, {
-            secret_token: this.config.webhook.secretToken,
-            drop_pending_updates: true
-          });
-          console.log(`[Bot] ✅ Webhook set to ${this.config.webhook.url}`);
-          break;
-        } catch (error: any) {
-          if (error.response?.error_code === 429) {
-            const retryAfter = error.response.parameters?.retry_after || 1;
-            console.log(`[Bot] ⏳ Rate limited, waiting ${retryAfter}s before retry (${retries} attempts left)`);
-            await new Promise(resolve => setTimeout(resolve, retryAfter * 1000));
-            retries--;
-          } else {
-            throw error;
+      // Check current webhook before setting new one
+      try {
+        const currentWebhook = await this.bot.telegram.getWebhookInfo();
+        const needsUpdate = currentWebhook.url !== this.config.webhook.url || 
+                           !currentWebhook.secret_token;
+        
+        if (needsUpdate) {
+          console.log(`[Bot] 🔄 Updating webhook from '${currentWebhook.url}' to '${this.config.webhook.url}'`);
+          
+          // Set webhook with retry logic for rate limiting
+          let retries = 3;
+          while (retries > 0) {
+            try {
+              await this.bot.telegram.setWebhook(this.config.webhook.url, {
+                secret_token: this.config.webhook.secretToken,
+                drop_pending_updates: true
+              });
+              console.log(`[Bot] ✅ Webhook set to ${this.config.webhook.url}`);
+              break;
+            } catch (error: any) {
+              if (error.response?.error_code === 429) {
+                const retryAfter = error.response.parameters?.retry_after || 1;
+                console.log(`[Bot] ⏳ Rate limited, waiting ${retryAfter}s before retry (${retries} attempts left)`);
+                await new Promise(resolve => setTimeout(resolve, retryAfter * 1000));
+                retries--;
+              } else {
+                throw error;
+              }
+            }
           }
+          
+          if (retries === 0) {
+            console.log(`[Bot] ⚠️ Failed to set webhook after retries, but server is running`);
+          }
+        } else {
+          console.log(`[Bot] ✅ Webhook already configured correctly: ${currentWebhook.url}`);
         }
-      }
-      
-      if (retries === 0) {
-        console.log(`[Bot] ⚠️ Failed to set webhook after retries, but server is running`);
+      } catch (error) {
+        console.error(`[Bot] ❌ Failed to check/set webhook:`, error);
+        // Continue anyway - the server can still receive webhooks
       }
       
       this.eventEmitter.emitEvent({
