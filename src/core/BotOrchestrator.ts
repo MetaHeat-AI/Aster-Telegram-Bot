@@ -452,13 +452,65 @@ export class BotOrchestrator {
     this.bot.action(/^spot_(buy|sell)_([A-Z0-9]+USDT)$/, (ctx) => {
       const action = ctx.match[1];  // 'buy' or 'sell'
       const symbol = ctx.match[2];  // 'BTCUSDT', 'ETHUSDT', etc.
-      this.tradingHandler.handleSpotSymbolTrading(ctx, symbol, action.toUpperCase() as 'BUY' | 'SELL');
+      this.handleSpotTradingSelection(ctx, symbol, action.toUpperCase() as 'BUY' | 'SELL');
     });
 
     this.bot.action(/^perps_(buy|sell)_([A-Z0-9]+USDT)$/, (ctx) => {
       const action = ctx.match[1];  // 'buy' or 'sell'
       const symbol = ctx.match[2];  // 'BTCUSDT', 'ETHUSDT', etc.
-      this.tradingHandler.handlePerpsSymbolTrading(ctx, symbol, action.toUpperCase() as 'BUY' | 'SELL');
+      this.handlePerpsLeverageSelection(ctx, symbol, action.toUpperCase() as 'BUY' | 'SELL');
+    });
+
+    // Two-step trading flow handlers
+    // Step 1: Leverage selection for perps
+    this.bot.action(/^perps_leverage_(buy|sell)_([A-Z0-9]+USDT)_(\d+)x$/, (ctx) => {
+      const action = ctx.match[1];
+      const symbol = ctx.match[2];
+      const leverage = parseInt(ctx.match[3]);
+      this.handlePerpsAmountSelection(ctx, symbol, action.toUpperCase() as 'BUY' | 'SELL', leverage);
+    });
+
+    // Step 2: Amount selection for perps/spot
+    this.bot.action(/^perps_amount_(buy|sell)_([A-Z0-9]+USDT)_(\d+)x_(\d+)pct$/, (ctx) => {
+      const action = ctx.match[1];
+      const symbol = ctx.match[2];
+      const leverage = parseInt(ctx.match[3]);
+      const percentage = parseInt(ctx.match[4]);
+      this.handlePerpsPercentageExecute(ctx, symbol, action.toUpperCase() as 'BUY' | 'SELL', leverage, percentage);
+    });
+
+    this.bot.action(/^spot_amount_(buy|sell)_([A-Z0-9]+USDT)_(\d+)pct$/, (ctx) => {
+      const action = ctx.match[1];
+      const symbol = ctx.match[2];
+      const percentage = parseInt(ctx.match[3]);
+      this.handleSpotPercentageExecute(ctx, symbol, action.toUpperCase() as 'BUY' | 'SELL', percentage);
+    });
+
+    // Manual amount input handlers
+    this.bot.action(/^perps_manual_usdt_(buy|sell)_([A-Z0-9]+USDT)_(\d+)x$/, (ctx) => {
+      const action = ctx.match[1];
+      const symbol = ctx.match[2];
+      const leverage = parseInt(ctx.match[3]);
+      this.handleManualUSDTInput(ctx, 'perps', symbol, action.toUpperCase() as 'BUY' | 'SELL', leverage);
+    });
+
+    this.bot.action(/^perps_manual_token_(buy|sell)_([A-Z0-9]+USDT)_(\d+)x$/, (ctx) => {
+      const action = ctx.match[1];
+      const symbol = ctx.match[2];
+      const leverage = parseInt(ctx.match[3]);
+      this.handleManualTokenInput(ctx, 'perps', symbol, action.toUpperCase() as 'BUY' | 'SELL', leverage);
+    });
+
+    this.bot.action(/^spot_manual_usdt_(buy|sell)_([A-Z0-9]+USDT)$/, (ctx) => {
+      const action = ctx.match[1];
+      const symbol = ctx.match[2];
+      this.handleManualUSDTInput(ctx, 'spot', symbol, action.toUpperCase() as 'BUY' | 'SELL');
+    });
+
+    this.bot.action(/^spot_manual_token_(buy|sell)_([A-Z0-9]+USDT)$/, (ctx) => {
+      const action = ctx.match[1];
+      const symbol = ctx.match[2];
+      this.handleManualTokenInput(ctx, 'spot', symbol, action.toUpperCase() as 'BUY' | 'SELL');
     });
 
     // Spot asset selling handlers
@@ -528,6 +580,18 @@ export class BotOrchestrator {
       // Check if expecting custom amount input
       if ((ctx.userState as any)?.expectingCustomAmount) {
         this.handleCustomAmountText(ctx, ctx.message.text);
+        return;
+      }
+      
+      // Check if expecting manual USDT input
+      if ((ctx.userState as any)?.expectingManualUSDT) {
+        this.handleManualUSDTText(ctx, ctx.message.text);
+        return;
+      }
+      
+      // Check if expecting manual token input
+      if ((ctx.userState as any)?.expectingManualToken) {
+        this.handleManualTokenText(ctx, ctx.message.text);
         return;
       }
       
@@ -1797,23 +1861,24 @@ If you need help, contact support or check the documentation.
    */
   private async handleTopMarketCap(ctx: BotContext): Promise<void> {
     try {
-      // Get top symbols by volume as a proxy for market cap
-      const topSymbols = ['BTCUSDT', 'ETHUSDT', 'BNBUSDT', 'ADAUSDT', 'XRPUSDT', 'SOLUSDT', 'DOTUSDT', 'LINKUSDT'];
+      // Top symbols by market cap (most established and valuable cryptocurrencies)
+      const topSymbols = [
+        'BTCUSDT', 'ETHUSDT', 'BNBUSDT', 'XRPUSDT', 'ADAUSDT', 
+        'SOLUSDT', 'DOTUSDT', 'LINKUSDT', 'AVAXUSDT', 'MATICUSDT'
+      ];
       
       let priceText = '🏆 **Top Market Cap Cryptocurrencies**\n\n';
       
       const pricePromises = topSymbols.map(async (symbol, index) => {
         try {
-          const price = await this.priceService.getCurrentPrice(symbol);
-          // Use public API client for price data
-          const AsterApiClient = await import('../aster');
-          const publicClient = new AsterApiClient.AsterApiClient('https://api.aster.exchange', '', '');
-          const ticker = await publicClient.get24hrTicker(symbol);
+          const ticker = await this.publicApiClient.get24hrTicker(symbol);
+          const price = parseFloat(ticker.lastPrice);
           const change24h = parseFloat(ticker.priceChangePercent);
+          const volume = parseFloat(ticker.volume);
           const changeEmoji = change24h >= 0 ? '🟢' : '🔴';
           const changeText = change24h >= 0 ? '+' : '';
           
-          return `${index + 1}. **${symbol.replace('USDT', '')}** • $${price.toFixed(6)}\n   ${changeEmoji} ${changeText}${change24h.toFixed(2)}% (24h)\n`;
+          return `${index + 1}. **${symbol.replace('USDT', '')}** • $${price.toFixed(price < 1 ? 6 : 2)}\n   ${changeEmoji} ${changeText}${change24h.toFixed(2)}% • Vol: ${(volume / 1000000).toFixed(1)}M\n`;
         } catch (error) {
           return `${index + 1}. **${symbol.replace('USDT', '')}** • Price unavailable\n`;
         }
@@ -1822,16 +1887,26 @@ If you need help, contact support or check the documentation.
       const priceResults = await Promise.all(pricePromises);
       priceText += priceResults.join('\n');
       
-      const keyboard = Markup.inlineKeyboard([
-        [
-          Markup.button.callback('📈 Top Volume', 'price_top_volume'),
-          Markup.button.callback('🔄 Refresh', 'price_top_mcap')
-        ],
-        [
-          Markup.button.callback('📈 Trade', 'unified_trade'),
-          Markup.button.callback('🔙 Back', 'price_menu')
-        ]
+      // Add clickable token buttons for quick access
+      const tokenButtons = topSymbols.slice(0, 6).map(symbol => 
+        Markup.button.callback(symbol.replace('USDT', ''), `price_token_${symbol}`)
+      );
+      
+      const buttonRows = [];
+      for (let i = 0; i < tokenButtons.length; i += 3) {
+        buttonRows.push(tokenButtons.slice(i, i + 3));
+      }
+      
+      buttonRows.push([
+        Markup.button.callback('📈 Top Volume', 'price_top_volume'),
+        Markup.button.callback('🔄 Refresh', 'price_top_mcap')
       ]);
+      buttonRows.push([
+        Markup.button.callback('📈 Trade', 'unified_trade'),
+        Markup.button.callback('🔙 Back', 'price_menu')
+      ]);
+      
+      const keyboard = Markup.inlineKeyboard(buttonRows);
 
       await ctx.editMessageText(priceText, { parse_mode: 'Markdown', ...keyboard });
     } catch (error) {
@@ -1845,39 +1920,47 @@ If you need help, contact support or check the documentation.
    */
   private async handleTopVolume(ctx: BotContext): Promise<void> {
     try {
-      // Use public API client for market data
-      const AsterApiClient = await import('../aster');
-      const apiClient = new AsterApiClient.AsterApiClient('https://api.aster.exchange', '', '');
-      const allTickers = await apiClient.getAllFuturesTickers();
+      const allTickers = await this.publicApiClient.getAllFuturesTickers();
       
-      // Sort by volume and take top 8
+      // Sort by volume and take top 10
       const topByVolume = allTickers
         .filter((ticker: any) => ticker.symbol.endsWith('USDT'))
         .sort((a: any, b: any) => parseFloat(b.volume) - parseFloat(a.volume))
-        .slice(0, 8);
+        .slice(0, 10);
       
-      let volumeText = '📈 **Highest Volume Trading Pairs**\n\n';
+      let volumeText = '📈 **Highest Volume Trading Pairs (24h)**\n\n';
       
       topByVolume.forEach((ticker: any, index: number) => {
+        const price = parseFloat(ticker.lastPrice);
         const change24h = parseFloat(ticker.priceChangePercent);
         const changeEmoji = change24h >= 0 ? '🟢' : '🔴';
         const changeText = change24h >= 0 ? '+' : '';
         const volume = (parseFloat(ticker.volume) / 1000000).toFixed(1); // Convert to millions
         
-        volumeText += `${index + 1}. **${ticker.symbol.replace('USDT', '')}** • $${parseFloat(ticker.lastPrice).toFixed(6)}\n`;
+        volumeText += `${index + 1}. **${ticker.symbol.replace('USDT', '')}** • $${price.toFixed(price < 1 ? 6 : 2)}\n`;
         volumeText += `   ${changeEmoji} ${changeText}${change24h.toFixed(2)}% • Vol: ${volume}M USDT\n\n`;
       });
       
-      const keyboard = Markup.inlineKeyboard([
-        [
-          Markup.button.callback('🏆 Top Market Cap', 'price_top_mcap'),
-          Markup.button.callback('🔄 Refresh', 'price_top_volume')
-        ],
-        [
-          Markup.button.callback('📈 Trade', 'unified_trade'),
-          Markup.button.callback('🔙 Back', 'price_menu')
-        ]
+      // Add clickable buttons for top volume tokens
+      const topTokenButtons = topByVolume.slice(0, 6).map((ticker: any) => 
+        Markup.button.callback(ticker.symbol.replace('USDT', ''), `price_token_${ticker.symbol}`)
+      );
+      
+      const buttonRows = [];
+      for (let i = 0; i < topTokenButtons.length; i += 3) {
+        buttonRows.push(topTokenButtons.slice(i, i + 3));
+      }
+      
+      buttonRows.push([
+        Markup.button.callback('🏆 Top Market Cap', 'price_top_mcap'),
+        Markup.button.callback('🔄 Refresh', 'price_top_volume')
       ]);
+      buttonRows.push([
+        Markup.button.callback('📈 Trade', 'unified_trade'),
+        Markup.button.callback('🔙 Back', 'price_menu')
+      ]);
+      
+      const keyboard = Markup.inlineKeyboard(buttonRows);
 
       await ctx.editMessageText(volumeText, { parse_mode: 'Markdown', ...keyboard });
     } catch (error) {
@@ -1898,18 +1981,16 @@ If you need help, contact support or check the documentation.
       
       const pricePromises = watchlist.map(async (symbol) => {
         try {
-          const price = await this.priceService.getCurrentPrice(symbol);
-          // Use public API client for price data
-          const AsterApiClient = await import('../aster');
-          const publicClient = new AsterApiClient.AsterApiClient('https://api.aster.exchange', '', '');
-          const ticker = await publicClient.get24hrTicker(symbol);
+          const ticker = await this.publicApiClient.get24hrTicker(symbol);
+          const price = parseFloat(ticker.lastPrice);
           const change24h = parseFloat(ticker.priceChangePercent);
+          const volume = parseFloat(ticker.volume);
           const changeEmoji = change24h >= 0 ? '🟢' : '🔴';
           const changeText = change24h >= 0 ? '+' : '';
           
           return [
-            `**${symbol.replace('USDT', '')}** • $${price.toFixed(6)}`,
-            `${changeEmoji} ${changeText}${change24h.toFixed(2)}% (24h)`,
+            `**${symbol.replace('USDT', '')}** • $${price.toFixed(price < 1 ? 6 : 2)}`,
+            `${changeEmoji} ${changeText}${change24h.toFixed(2)}% • Vol: ${(volume / 1000000).toFixed(1)}M`,
             ''
           ].join('\n');
         } catch (error) {
@@ -2327,6 +2408,409 @@ If you need help, contact support or check the documentation.
         ])
       }
     );
+  }
+
+  /**
+   * Handle perps leverage selection (Step 1 of trading flow)
+   */
+  private async handlePerpsLeverageSelection(ctx: BotContext, symbol: string, side: 'BUY' | 'SELL'): Promise<void> {
+    if (!ctx.userState?.isLinked) {
+      await ctx.reply('❌ Please link your API credentials first using /link');
+      return;
+    }
+
+    try {
+      const currentPrice = await this.priceService.getCurrentPrice(symbol);
+      const sideText = side === 'BUY' ? 'Long' : 'Short';
+      const emoji = side === 'BUY' ? '🟢' : '🔴';
+      
+      const leverageText = [
+        `${emoji} **${sideText} ${symbol.replace('USDT', '')}**`,
+        `💵 **Current Price:** $${currentPrice.toFixed(6)}`,
+        '',
+        '🎯 **Step 1: Select Leverage**',
+        '',
+        '⚡ **Choose your leverage multiplier:**'
+      ].join('\n');
+
+      const keyboard = Markup.inlineKeyboard([
+        [
+          Markup.button.callback('2x', `perps_leverage_${side.toLowerCase()}_${symbol}_2x`),
+          Markup.button.callback('3x', `perps_leverage_${side.toLowerCase()}_${symbol}_3x`),
+          Markup.button.callback('5x', `perps_leverage_${side.toLowerCase()}_${symbol}_5x`)
+        ],
+        [
+          Markup.button.callback('10x', `perps_leverage_${side.toLowerCase()}_${symbol}_10x`),
+          Markup.button.callback('20x', `perps_leverage_${side.toLowerCase()}_${symbol}_20x`),
+          Markup.button.callback('50x', `perps_leverage_${side.toLowerCase()}_${symbol}_50x`)
+        ],
+        [
+          Markup.button.callback('🔙 Back', 'trade_perps')
+        ]
+      ]);
+
+      await ctx.editMessageText(leverageText, { parse_mode: 'Markdown', ...keyboard });
+    } catch (error) {
+      console.error('Perps leverage selection error:', error);
+      await ctx.reply(`❌ Failed to load leverage selection for ${symbol}. Please try again.`);
+    }
+  }
+
+  /**
+   * Handle perps amount selection (Step 2 of trading flow)
+   */
+  private async handlePerpsAmountSelection(ctx: BotContext, symbol: string, side: 'BUY' | 'SELL', leverage: number): Promise<void> {
+    try {
+      const apiClient = await this.apiClientService.getOrCreateClient(ctx.userState!.userId);
+      const FuturesAccountService = await import('../services/FuturesAccountService');
+      const futuresService = new FuturesAccountService.FuturesAccountService(apiClient);
+      
+      const account = await futuresService.getFuturesAccount();
+      const usdtAsset = account.assets.find(a => a.asset === 'USDT');
+      const availableBalance = parseFloat(usdtAsset?.availableBalance || '0');
+      
+      const currentPrice = await this.priceService.getCurrentPrice(symbol);
+      const sideText = side === 'BUY' ? 'Long' : 'Short';
+      const emoji = side === 'BUY' ? '🟢' : '🔴';
+      
+      const amountText = [
+        `${emoji} **${sideText} ${symbol.replace('USDT', '')} ${leverage}x**`,
+        `💵 **Current Price:** $${currentPrice.toFixed(6)}`,
+        `💰 **Available Balance:** $${availableBalance.toFixed(2)} USDT`,
+        '',
+        '🎯 **Step 2: Select Position Size**',
+        '',
+        '📊 **Quick Percentage Options:**'
+      ].join('\n');
+
+      const keyboard = Markup.inlineKeyboard([
+        [
+          Markup.button.callback(`25% ($${(availableBalance * 0.25).toFixed(2)})`, `perps_amount_${side.toLowerCase()}_${symbol}_${leverage}x_25pct`),
+          Markup.button.callback(`50% ($${(availableBalance * 0.50).toFixed(2)})`, `perps_amount_${side.toLowerCase()}_${symbol}_${leverage}x_50pct`)
+        ],
+        [
+          Markup.button.callback(`75% ($${(availableBalance * 0.75).toFixed(2)})`, `perps_amount_${side.toLowerCase()}_${symbol}_${leverage}x_75pct`),
+          Markup.button.callback(`100% ($${availableBalance.toFixed(2)})`, `perps_amount_${side.toLowerCase()}_${symbol}_${leverage}x_100pct`)
+        ],
+        [
+          Markup.button.callback('💰 Enter USDT Amount', `perps_manual_usdt_${side.toLowerCase()}_${symbol}_${leverage}x`),
+          Markup.button.callback('🪙 Enter Token Amount', `perps_manual_token_${side.toLowerCase()}_${symbol}_${leverage}x`)
+        ],
+        [
+          Markup.button.callback('🔙 Back to Leverage', `perps_${side.toLowerCase()}_${symbol}`)
+        ]
+      ]);
+
+      await ctx.editMessageText(amountText, { parse_mode: 'Markdown', ...keyboard });
+    } catch (error) {
+      console.error('Perps amount selection error:', error);
+      await ctx.reply(`❌ Failed to load amount selection for ${symbol}. Please try again.`);
+    }
+  }
+
+  /**
+   * Handle spot trading selection (single step for spot)
+   */
+  private async handleSpotTradingSelection(ctx: BotContext, symbol: string, side: 'BUY' | 'SELL'): Promise<void> {
+    if (!ctx.userState?.isLinked) {
+      await ctx.reply('❌ Please link your API credentials first using /link');
+      return;
+    }
+
+    try {
+      const apiClient = await this.apiClientService.getOrCreateClient(ctx.userState.userId);
+      const SpotAccountService = await import('../services/SpotAccountService');
+      const spotService = new SpotAccountService.SpotAccountService(apiClient);
+      
+      let availableBalance = 0;
+      if (side === 'BUY') {
+        const usdtBalance = await spotService.getUsdtBalance();
+        availableBalance = usdtBalance;
+      } else {
+        const asset = symbol.replace('USDT', '');
+        const assetBalance = await spotService.getAssetBalance(asset);
+        if (assetBalance) {
+          availableBalance = assetBalance.usdValue || 0;
+        }
+      }
+      
+      const currentPrice = await this.priceService.getCurrentPrice(symbol);
+      const sideText = side === 'BUY' ? 'Buy' : 'Sell';
+      const emoji = side === 'BUY' ? '🟢' : '🔴';
+      const balanceText = side === 'BUY' ? 'USDT Balance' : `${symbol.replace('USDT', '')} Value`;
+      
+      const spotText = [
+        `${emoji} **${sideText} ${symbol.replace('USDT', '')}**`,
+        `💵 **Current Price:** $${currentPrice.toFixed(6)}`,
+        `💰 **Available ${balanceText}:** $${availableBalance.toFixed(2)}`,
+        '',
+        '🎯 **Select Position Size:**',
+        '',
+        '📊 **Quick Percentage Options:**'
+      ].join('\n');
+
+      const keyboard = Markup.inlineKeyboard([
+        [
+          Markup.button.callback(`25% ($${(availableBalance * 0.25).toFixed(2)})`, `spot_amount_${side.toLowerCase()}_${symbol}_25pct`),
+          Markup.button.callback(`50% ($${(availableBalance * 0.50).toFixed(2)})`, `spot_amount_${side.toLowerCase()}_${symbol}_50pct`)
+        ],
+        [
+          Markup.button.callback(`75% ($${(availableBalance * 0.75).toFixed(2)})`, `spot_amount_${side.toLowerCase()}_${symbol}_75pct`),
+          Markup.button.callback(`100% ($${availableBalance.toFixed(2)})`, `spot_amount_${side.toLowerCase()}_${symbol}_100pct`)
+        ],
+        [
+          Markup.button.callback('💰 Enter USDT Amount', `spot_manual_usdt_${side.toLowerCase()}_${symbol}`),
+          Markup.button.callback('🪙 Enter Token Amount', `spot_manual_token_${side.toLowerCase()}_${symbol}`)
+        ],
+        [
+          Markup.button.callback('🔙 Back', 'trade_spot')
+        ]
+      ]);
+
+      await ctx.editMessageText(spotText, { parse_mode: 'Markdown', ...keyboard });
+    } catch (error) {
+      console.error('Spot trading selection error:', error);
+      await ctx.reply(`❌ Failed to load trading selection for ${symbol}. Please try again.`);
+    }
+  }
+
+  /**
+   * Handle perps percentage execution
+   */
+  private async handlePerpsPercentageExecute(ctx: BotContext, symbol: string, side: 'BUY' | 'SELL', leverage: number, percentage: number): Promise<void> {
+    try {
+      const apiClient = await this.apiClientService.getOrCreateClient(ctx.userState!.userId);
+      const FuturesAccountService = await import('../services/FuturesAccountService');
+      const futuresService = new FuturesAccountService.FuturesAccountService(apiClient);
+      
+      const account = await futuresService.getFuturesAccount();
+      const usdtAsset = account.assets.find(a => a.asset === 'USDT');
+      const availableBalance = parseFloat(usdtAsset?.availableBalance || '0');
+      
+      const usdtAmount = Math.floor(availableBalance * (percentage / 100));
+      
+      if (usdtAmount < 1) {
+        await ctx.reply(`❌ Insufficient balance. You need at least $1 USDT to trade. Available: $${availableBalance.toFixed(2)}`);
+        return;
+      }
+      
+      await this.handlePerpsExecuteAction(ctx, symbol, side, usdtAmount, leverage);
+    } catch (error) {
+      console.error('Perps percentage execution error:', error);
+      await ctx.reply('❌ Failed to execute percentage trade. Please try again.');
+    }
+  }
+
+  /**
+   * Handle spot percentage execution
+   */
+  private async handleSpotPercentageExecute(ctx: BotContext, symbol: string, side: 'BUY' | 'SELL', percentage: number): Promise<void> {
+    try {
+      const apiClient = await this.apiClientService.getOrCreateClient(ctx.userState!.userId);
+      const SpotAccountService = await import('../services/SpotAccountService');
+      const spotService = new SpotAccountService.SpotAccountService(apiClient);
+      
+      let usdtAmount = 0;
+      if (side === 'BUY') {
+        const usdtBalance = await spotService.getUsdtBalance();
+        usdtAmount = Math.floor(usdtBalance * (percentage / 100));
+      } else {
+        const asset = symbol.replace('USDT', '');
+        const assetBalance = await spotService.getAssetBalance(asset);
+        if (assetBalance && assetBalance.usdValue) {
+          usdtAmount = Math.floor(assetBalance.usdValue * (percentage / 100));
+        }
+      }
+      
+      if (usdtAmount < 1) {
+        await ctx.reply(`❌ Insufficient balance. You need at least $1 USDT equivalent to trade.`);
+        return;
+      }
+      
+      await this.handleSpotExecuteAction(ctx, symbol, side, usdtAmount);
+    } catch (error) {
+      console.error('Spot percentage execution error:', error);
+      await ctx.reply('❌ Failed to execute percentage trade. Please try again.');
+    }
+  }
+
+  /**
+   * Handle manual USDT input
+   */
+  private async handleManualUSDTInput(ctx: BotContext, mode: 'spot' | 'perps', symbol: string, side: 'BUY' | 'SELL', leverage?: number): Promise<void> {
+    const modeText = mode === 'spot' ? 'Spot' : 'Perps';
+    const sideText = side === 'BUY' ? (mode === 'spot' ? 'Buy' : 'Long') : (mode === 'spot' ? 'Sell' : 'Short');
+    const leverageText = leverage ? ` ${leverage}x` : '';
+    
+    const inputText = [
+      `💰 **Manual USDT Amount**`,
+      `**${modeText} ${sideText}${leverageText}:** ${symbol.replace('USDT', '')}`,
+      '',
+      '✍️ **Enter your USDT amount:**',
+      '',
+      '📝 **Examples:**',
+      '• 25 (for $25 USDT)',
+      '• 100 (for $100 USDT)',
+      '• 500 (for $500 USDT)',
+      '',
+      '⏳ **Waiting for your input...**'
+    ].join('\n');
+
+    const keyboard = Markup.inlineKeyboard([
+      [
+        Markup.button.callback('$25', mode === 'spot' ? `spot_amount_${side.toLowerCase()}_${symbol}_25pct` : `perps_amount_${side.toLowerCase()}_${symbol}_${leverage}x_25pct`),
+        Markup.button.callback('$50', mode === 'spot' ? `spot_amount_${side.toLowerCase()}_${symbol}_50pct` : `perps_amount_${side.toLowerCase()}_${symbol}_${leverage}x_50pct`)
+      ],
+      [
+        Markup.button.callback('$100', mode === 'spot' ? `spot_amount_${side.toLowerCase()}_${symbol}_75pct` : `perps_amount_${side.toLowerCase()}_${symbol}_${leverage}x_75pct`),
+        Markup.button.callback('$250', mode === 'spot' ? `spot_amount_${side.toLowerCase()}_${symbol}_100pct` : `perps_amount_${side.toLowerCase()}_${symbol}_${leverage}x_100pct`)
+      ],
+      [
+        Markup.button.callback('🔙 Back', mode === 'spot' ? `spot_${side.toLowerCase()}_${symbol}` : `perps_leverage_${side.toLowerCase()}_${symbol}_${leverage}x`)
+      ]
+    ]);
+
+    await ctx.editMessageText(inputText, { parse_mode: 'Markdown', ...keyboard });
+
+    // Set conversation state
+    if (ctx.userState) {
+      (ctx.userState as any).expectingManualUSDT = { mode, symbol, side, leverage };
+    }
+  }
+
+  /**
+   * Handle manual token input
+   */
+  private async handleManualTokenInput(ctx: BotContext, mode: 'spot' | 'perps', symbol: string, side: 'BUY' | 'SELL', leverage?: number): Promise<void> {
+    const tokenSymbol = symbol.replace('USDT', '');
+    const modeText = mode === 'spot' ? 'Spot' : 'Perps';
+    const sideText = side === 'BUY' ? (mode === 'spot' ? 'Buy' : 'Long') : (mode === 'spot' ? 'Sell' : 'Short');
+    const leverageText = leverage ? ` ${leverage}x` : '';
+    
+    const inputText = [
+      `🪙 **Manual Token Amount**`,
+      `**${modeText} ${sideText}${leverageText}:** ${tokenSymbol}`,
+      '',
+      `✍️ **Enter your ${tokenSymbol} amount:**`,
+      '',
+      '📝 **Examples:**',
+      '• 0.001 (for 0.001 BTC)',
+      '• 1 (for 1 ETH)',
+      '• 100 (for 100 ADA)',
+      '',
+      '⏳ **Waiting for your input...**'
+    ].join('\n');
+
+    const keyboard = Markup.inlineKeyboard([
+      [
+        Markup.button.callback('0.001', ''),
+        Markup.button.callback('0.01', '')
+      ],
+      [
+        Markup.button.callback('0.1', ''),
+        Markup.button.callback('1', '')
+      ],
+      [
+        Markup.button.callback('🔙 Back', mode === 'spot' ? `spot_${side.toLowerCase()}_${symbol}` : `perps_leverage_${side.toLowerCase()}_${symbol}_${leverage}x`)
+      ]
+    ]);
+
+    await ctx.editMessageText(inputText, { parse_mode: 'Markdown', ...keyboard });
+
+    // Set conversation state
+    if (ctx.userState) {
+      (ctx.userState as any).expectingManualToken = { mode, symbol, side, leverage };
+    }
+  }
+
+  /**
+   * Handle manual USDT text input
+   */
+  private async handleManualUSDTText(ctx: BotContext, text: string): Promise<void> {
+    const state = (ctx.userState as any)?.expectingManualUSDT;
+    if (!state) return;
+
+    // Clear conversation state
+    delete (ctx.userState as any).expectingManualUSDT;
+
+    const { mode, symbol, side, leverage } = state;
+    const amount = parseFloat(text.trim());
+
+    if (isNaN(amount) || amount <= 0) {
+      await ctx.reply(
+        `❌ **Invalid Amount**\n\n` +
+        `Please enter a valid positive number for USDT amount.\n\n` +
+        `Example: 25, 100, 500`
+      );
+      return;
+    }
+
+    if (amount > 10000) {
+      await ctx.reply(
+        `❌ **Amount Too Large**\n\n` +
+        `Maximum amount is $10,000 USDT per trade.\n\n` +
+        `Please enter a smaller amount.`
+      );
+      return;
+    }
+
+    try {
+      if (mode === 'spot') {
+        await this.handleSpotExecuteAction(ctx, symbol, side, amount);
+      } else {
+        await this.handlePerpsExecuteAction(ctx, symbol, side, amount, leverage);
+      }
+    } catch (error) {
+      console.error('Manual USDT execution error:', error);
+      await ctx.reply('❌ Failed to execute trade. Please try again.');
+    }
+  }
+
+  /**
+   * Handle manual token text input
+   */
+  private async handleManualTokenText(ctx: BotContext, text: string): Promise<void> {
+    const state = (ctx.userState as any)?.expectingManualToken;
+    if (!state) return;
+
+    // Clear conversation state
+    delete (ctx.userState as any).expectingManualToken;
+
+    const { mode, symbol, side, leverage } = state;
+    const tokenAmount = parseFloat(text.trim());
+
+    if (isNaN(tokenAmount) || tokenAmount <= 0) {
+      await ctx.reply(
+        `❌ **Invalid Amount**\n\n` +
+        `Please enter a valid positive number for token amount.\n\n` +
+        `Example: 0.001, 1, 100`
+      );
+      return;
+    }
+
+    try {
+      // Convert token amount to USDT
+      const currentPrice = await this.priceService.getCurrentPrice(symbol);
+      const usdtAmount = tokenAmount * currentPrice;
+
+      if (usdtAmount > 50000) {
+        await ctx.reply(
+          `❌ **Amount Too Large**\n\n` +
+          `Token amount equivalent to $${usdtAmount.toFixed(2)} USDT is too large.\n\n` +
+          `Maximum is $50,000 USDT equivalent per trade.`
+        );
+        return;
+      }
+
+      if (mode === 'spot') {
+        await this.handleSpotExecuteAction(ctx, symbol, side, usdtAmount);
+      } else {
+        await this.handlePerpsExecuteAction(ctx, symbol, side, usdtAmount, leverage);
+      }
+    } catch (error) {
+      console.error('Manual token execution error:', error);
+      await ctx.reply('❌ Failed to execute trade. Please try again.');
+    }
   }
 
   /**
