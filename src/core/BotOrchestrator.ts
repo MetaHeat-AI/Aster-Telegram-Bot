@@ -255,6 +255,27 @@ export class BotOrchestrator {
       this.tradingHandler.handlePerpsTrading(ctx)
     );
 
+    // Dynamic symbol trading actions
+    this.bot.action(/^perps_buy_(.+)$/, (ctx) => {
+      const symbol = ctx.match[1];
+      this.tradingHandler.handlePerpsSymbolTrading(ctx, symbol, 'BUY');
+    });
+
+    this.bot.action(/^perps_sell_(.+)$/, (ctx) => {
+      const symbol = ctx.match[1];
+      this.tradingHandler.handlePerpsSymbolTrading(ctx, symbol, 'SELL');
+    });
+
+    this.bot.action(/^spot_buy_(.+)$/, (ctx) => {
+      const symbol = ctx.match[1];
+      this.tradingHandler.handleSpotSymbolTrading(ctx, symbol, 'BUY');
+    });
+
+    this.bot.action(/^spot_sell_(.+)$/, (ctx) => {
+      const symbol = ctx.match[1];
+      this.tradingHandler.handleSpotSymbolTrading(ctx, symbol, 'SELL');
+    });
+
     console.log('[Orchestrator] Actions registered');
   }
 

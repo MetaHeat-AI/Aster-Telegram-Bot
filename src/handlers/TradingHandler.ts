@@ -382,4 +382,76 @@ export class TradingHandler extends BaseHandler {
 
     await ctx.reply(perpsText, { parse_mode: 'Markdown', ...keyboard });
   }
+
+  /**
+   * Handle perps symbol trading (Long/Short specific symbol)
+   */
+  async handlePerpsSymbolTrading(ctx: BotContext, symbol: string, side: 'BUY' | 'SELL'): Promise<void> {
+    await this.executeWithErrorHandling(
+      ctx,
+      async () => {
+        const action = side === 'BUY' ? 'Long' : 'Short';
+        const emoji = side === 'BUY' ? '📈' : '📉';
+        
+        await ctx.reply(`${emoji} **${action} ${symbol}**\n\nSelect amount and leverage:`, {
+          parse_mode: 'Markdown',
+          reply_markup: {
+            inline_keyboard: [
+              [
+                { text: `${emoji} ${action} $25 5x`, callback_data: `perps_execute_${side.toLowerCase()}_${symbol}_25u_5x` },
+                { text: `${emoji} ${action} $50 5x`, callback_data: `perps_execute_${side.toLowerCase()}_${symbol}_50u_5x` }
+              ],
+              [
+                { text: `${emoji} ${action} $100 10x`, callback_data: `perps_execute_${side.toLowerCase()}_${symbol}_100u_10x` },
+                { text: `${emoji} ${action} $200 10x`, callback_data: `perps_execute_${side.toLowerCase()}_${symbol}_200u_10x` }
+              ],
+              [
+                { text: '💰 Custom Amount', callback_data: `perps_custom_amount_${side.toLowerCase()}_${symbol}` }
+              ],
+              [
+                { text: '🔙 Back to Perps', callback_data: 'trade_perps' }
+              ]
+            ]
+          }
+        });
+      },
+      `Failed to show ${side.toLowerCase()} options for ${symbol}`
+    );
+  }
+
+  /**
+   * Handle spot symbol trading (Buy/Sell specific symbol)
+   */
+  async handleSpotSymbolTrading(ctx: BotContext, symbol: string, side: 'BUY' | 'SELL'): Promise<void> {
+    await this.executeWithErrorHandling(
+      ctx,
+      async () => {
+        const action = side === 'BUY' ? 'Buy' : 'Sell';
+        const emoji = side === 'BUY' ? '🟢' : '🔴';
+        
+        await ctx.reply(`${emoji} **${action} ${symbol}**\n\nSelect amount:`, {
+          parse_mode: 'Markdown',
+          reply_markup: {
+            inline_keyboard: [
+              [
+                { text: `${emoji} ${action} $25`, callback_data: `spot_execute_${side.toLowerCase()}_${symbol}_25u` },
+                { text: `${emoji} ${action} $50`, callback_data: `spot_execute_${side.toLowerCase()}_${symbol}_50u` }
+              ],
+              [
+                { text: `${emoji} ${action} $100`, callback_data: `spot_execute_${side.toLowerCase()}_${symbol}_100u` },
+                { text: `${emoji} ${action} $200`, callback_data: `spot_execute_${side.toLowerCase()}_${symbol}_200u` }
+              ],
+              [
+                { text: '💰 Custom Amount', callback_data: `spot_custom_amount_${side.toLowerCase()}_${symbol}` }
+              ],
+              [
+                { text: '🔙 Back to Spot', callback_data: 'trade_spot' }
+              ]
+            ]
+          }
+        });
+      },
+      `Failed to show ${side.toLowerCase()} options for ${symbol}`
+    );
+  }
 }
