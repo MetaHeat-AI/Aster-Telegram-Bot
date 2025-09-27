@@ -168,14 +168,8 @@ export class BotOrchestrator {
       });
     });
 
-    // Webhook endpoint
-    this.server.use(
-      this.config.webhook.path,
-      this.bot.webhookCallback(this.config.webhook.path, {
-        secretToken: this.config.webhook.secretToken
-      })
-    );
-    console.log(`[Orchestrator] Webhook endpoint configured at ${this.config.webhook.path}`);
+    // Webhook endpoint - will be set up after bot initialization
+    console.log(`[Orchestrator] Webhook endpoint will be configured at ${this.config.webhook.path}`);
     
     console.log('[Orchestrator] Server setup complete');
   }
@@ -301,11 +295,20 @@ export class BotOrchestrator {
         throw new Error('Webhook configuration is required. Polling mode is no longer supported.');
       }
 
+      // Setup webhook endpoint AFTER bot is ready
+      this.server.use(
+        this.config.webhook.path,
+        this.bot.webhookCallback(this.config.webhook.path, {
+          secretToken: this.config.webhook.secretToken
+        })
+      );
+      console.log(`[Server] ✅ Webhook endpoint registered at ${this.config.webhook.path}`);
+
       await this.bot.telegram.setWebhook(this.config.webhook.url, {
         secret_token: this.config.webhook.secretToken,
         drop_pending_updates: true
       });
-      console.log(`[Bot] Webhook set to ${this.config.webhook.url}`);
+      console.log(`[Bot] ✅ Webhook set to ${this.config.webhook.url}`);
       
       this.eventEmitter.emitEvent({
         type: EventTypes.BOT_STARTED,
