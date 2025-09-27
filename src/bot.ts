@@ -167,7 +167,7 @@ class AsterTradingBot {
       const welcomeText = `
 🚀 **Welcome to AsterBot — Your Aster Telegram Terminal**
 
-Trade Aster DEX directly on Telegram — faster, more convenient, and always at your fingertips. Execute trades instantly, manage positions in real time, receive live alerts, and control your wallets without switching platforms. All powered via the official @Aster_Dex API.
+Trade Aster DEX directly on Telegram — faster, more convenient, and always at your fingertips. Execute trades instantly, manage positions in real time, receive live alerts, and control your wallets without switching platforms. All powered via the official @AsterDex API.
 
 **🌟 Why Choose AsterBot?**
 
@@ -1924,15 +1924,19 @@ ${trade.maxSlippageExceeded ? '\n❌ **Max slippage exceeded**' : ''}
         })
       ]);
       
-      let balanceText = '💰 **ACCOUNT OVERVIEW**\n';
-      balanceText += '═'.repeat(50) + '\n\n';
-      
-      // Combined summary
+      // Create beautiful header with portfolio value
       let totalValue = 0;
       if (spotPortfolio) totalValue += spotPortfolio.totalUsdValue;
       if (futuresPortfolio) totalValue += futuresPortfolio.totalWalletBalance;
       
-      balanceText += `🏦 **Total Portfolio Value:** $${totalValue.toFixed(2)}\n\n`;
+      let balanceText = [
+        '💰 **PORTFOLIO OVERVIEW**',
+        '═'.repeat(40),
+        '',
+        `🏦 **Total Value: $${totalValue.toFixed(2)}**`,
+        '',
+        '📊 **Account Breakdown:**'
+      ].join('\n');
       
       // Spot Portfolio
       if (spotPortfolio) {

@@ -129,44 +129,85 @@ export class SpotAccountService {
   }
 
   formatSpotPortfolio(summary: SpotPortfolioSummary): string {
-    let output = '💰 **SPOT PORTFOLIO**\n';
-    output += '═'.repeat(40) + '\n\n';
+    let output = [
+      '',
+      '🏪 **SPOT PORTFOLIO**',
+      '─'.repeat(30),
+      ''
+    ].join('\n');
 
-    // Portfolio overview
-    output += `📊 **Total Value:** $${summary.totalUsdValue.toFixed(2)}\n`;
-    output += `💵 **USDT Balance:** $${summary.usdtBalance.toFixed(2)}\n`;
-    output += `🏦 **Total Assets:** ${summary.totalAssets}\n\n`;
+    // Calculate portfolio performance indicators
+    const usdtPercentage = summary.totalUsdValue > 0 ? (summary.usdtBalance / summary.totalUsdValue * 100) : 0;
+    const diversificationEmoji = summary.totalAssets > 10 ? '🌟' : summary.totalAssets > 5 ? '💫' : '🔸';
 
-    // Main holdings
+    // Portfolio overview with beautiful formatting
+    output += [
+      `💰 **Total Value:** $${summary.totalUsdValue.toFixed(2)}`,
+      `💵 **USDT Balance:** $${summary.usdtBalance.toFixed(2)} (${usdtPercentage.toFixed(1)}%)`,
+      `${diversificationEmoji} **Diversification:** ${summary.totalAssets} tokens`,
+      ''
+    ].join('\n');
+
+    // Main holdings with enhanced visuals
     if (summary.mainAssets.length > 0) {
-      output += '**🏆 Main Holdings (>$10):**\n';
-      summary.mainAssets.forEach(balance => {
+      output += '🏆 **Major Holdings:**\n';
+      summary.mainAssets.forEach((balance, index) => {
         const percentage = summary.totalUsdValue > 0 ? (balance.usdValue! / summary.totalUsdValue * 100) : 0;
-        output += `• **${balance.asset}**: ${balance.total.toFixed(6)} `;
-        output += `($${balance.usdValue!.toFixed(2)} • ${percentage.toFixed(1)}%)\n`;
-        if (parseFloat(balance.locked) > 0) {
-          output += `  └ Locked: ${balance.locked}\n`;
-        }
+        const rank = index + 1;
+        const progressBar = this.generateProgressBar(percentage, 12);
+        
+        // Asset performance indicators
+        const concentrationEmoji = percentage > 50 ? '🎯' : percentage > 25 ? '🔥' : '💎';
+        const medalEmoji = rank === 1 ? '🥇' : rank === 2 ? '🥈' : rank === 3 ? '🥉' : '💫';
+        
+        output += [
+          `${medalEmoji} **${rank}. ${balance.asset}** ${concentrationEmoji}`,
+          `   📊 Holdings: ${balance.total.toFixed(4)} tokens`,
+          `   💰 Value: $${balance.usdValue!.toFixed(2)} (${percentage.toFixed(1)}%)`,
+          `   ${progressBar}`,
+          parseFloat(balance.locked) > 0 ? `   🔒 Locked: ${balance.locked}` : '',
+          ''
+        ].filter(Boolean).join('\n');
       });
-      output += '\n';
     }
 
-    // Small balances
+    // Small balances section with enhanced formatting
     if (summary.smallBalances.length > 0) {
-      output += '**🪙 Small Holdings (<$10):**\n';
       const smallTotal = summary.smallBalances.reduce((sum, b) => sum + (b.usdValue || 0), 0);
-      output += `${summary.smallBalances.length} assets worth $${smallTotal.toFixed(2)} total\n`;
+      const smallPercentage = summary.totalUsdValue > 0 ? (smallTotal / summary.totalUsdValue * 100) : 0;
       
-      // Show up to 3 small balances
-      summary.smallBalances.slice(0, 3).forEach(balance => {
-        output += `• ${balance.asset}: ${balance.total.toFixed(6)} ($${balance.usdValue!.toFixed(2)})\n`;
+      output += [
+        '🪙 **Small Holdings:**',
+        `   📊 ${summary.smallBalances.length} assets • $${smallTotal.toFixed(2)} total (${smallPercentage.toFixed(1)}%)`,
+        ''
+      ].join('\n');
+      
+      // Show top 3 small balances in compact format with better spacing
+      summary.smallBalances.slice(0, 3).forEach((balance, index) => {
+        const bullet = index === 0 ? '▸' : index === 1 ? '▹' : '▫';
+        output += `   ${bullet} **${balance.asset}**: $${balance.usdValue!.toFixed(2)}\n`;
       });
       
       if (summary.smallBalances.length > 3) {
-        output += `• ... and ${summary.smallBalances.length - 3} more\n`;
+        output += `   ▫ ... +${summary.smallBalances.length - 3} more assets\n`;
       }
+      output += '\n';
     }
 
+    // Add footer with helpful info
+    output += [
+      '─'.repeat(25),
+      '💡 *Use /trade to start trading*',
+      ''
+    ].join('\n');
+
     return output;
+  }
+
+  private generateProgressBar(percentage: number, length: number): string {
+    const filled = Math.round((percentage / 100) * length);
+    const empty = length - filled;
+    const bar = '█'.repeat(filled) + '░'.repeat(empty);
+    return `${bar} ${percentage.toFixed(1)}%`;
   }
 }
