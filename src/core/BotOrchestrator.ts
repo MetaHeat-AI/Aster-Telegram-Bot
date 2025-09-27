@@ -1207,11 +1207,16 @@ Contact @AsterDEX\\_Support or visit docs.aster.exchange for detailed guides.
     }
 
     // Set conversation state to wait for API key
-    ctx.userState.conversationState = {
+    const conversationState = {
       step: 'waiting_api_key',
       data: { pendingAction: 'link' }
     };
-
+    
+    ctx.userState.conversationState = conversationState;
+    
+    // Store in middleware for persistence across requests
+    this.authMiddleware.setConversationState(ctx.userState.telegramId, conversationState);
+    
     console.log(`[Link] Set conversation state for user ${ctx.userState.telegramId}: waiting_api_key`);
 
     const linkingText = [
@@ -1249,6 +1254,7 @@ Contact @AsterDEX\\_Support or visit docs.aster.exchange for detailed guides.
     // Clear conversation state
     if (ctx.userState) {
       ctx.userState.conversationState = undefined;
+      this.authMiddleware.clearConversationState(ctx.userState.telegramId);
     }
 
     await ctx.editMessageText(
@@ -1280,6 +1286,9 @@ Contact @AsterDEX\\_Support or visit docs.aster.exchange for detailed guides.
       }
       ctx.userState!.conversationState!.data!.apiKey = trimmedKey;
       ctx.userState!.conversationState!.step = 'waiting_api_secret';
+      
+      // Update stored conversation state
+      this.authMiddleware.setConversationState(ctx.userState.telegramId, ctx.userState.conversationState);
 
       const secretText = [
         '🔒 **Step 2: API Secret**',
@@ -1355,6 +1364,9 @@ Contact @AsterDEX\\_Support or visit docs.aster.exchange for detailed guides.
       ctx.userState!.isLinked = true;
       ctx.userState!.userId = user.id;
       ctx.userState!.conversationState = undefined;
+      
+      // Clear stored conversation state
+      this.authMiddleware.clearConversationState(ctx.userState.telegramId);
 
       // Success message
       const successText = [
@@ -1385,6 +1397,7 @@ Contact @AsterDEX\\_Support or visit docs.aster.exchange for detailed guides.
       // Clear conversation state
       if (ctx.userState) {
         ctx.userState.conversationState = undefined;
+        this.authMiddleware.clearConversationState(ctx.userState.telegramId);
       }
 
       const errorMessage = error.message || 'Unknown error';

@@ -11,6 +11,7 @@ export interface BotContext extends Context {
 export class AuthMiddleware {
   private db: DatabaseManager;
   private eventEmitter: BotEventEmitter;
+  private conversationStates: Map<number, any> = new Map(); // Temporary conversation state storage
 
   constructor(db: DatabaseManager, eventEmitter: BotEventEmitter) {
     this.db = db;
@@ -40,13 +41,15 @@ export class AuthMiddleware {
         }
 
         // Load or create user state
-        const existingConversationState = ctx.userState?.conversationState;
         ctx.userState = await this.loadUserState(telegramId);
         
-        // Preserve conversation state if it exists
-        if (existingConversationState && ctx.userState) {
-          ctx.userState.conversationState = existingConversationState;
-          console.log(`[Auth] Preserved conversation state: ${existingConversationState.step}`);
+        // Restore conversation state from temporary storage
+        const storedConversationState = this.conversationStates.get(telegramId);
+        if (storedConversationState && ctx.userState) {
+          ctx.userState.conversationState = storedConversationState;
+          console.log(`[Auth] Restored conversation state: ${storedConversationState.step}`);
+        } else {
+          console.log(`[Auth] No stored conversation state for user ${telegramId}`);
         }
         
         if (ctx.userState) {
@@ -67,6 +70,28 @@ export class AuthMiddleware {
         await ctx.reply('❌ Authentication failed. Please try again.');
       }
     };
+  }
+
+  /**
+   * Store conversation state temporarily
+   */
+  setConversationState(telegramId: number, conversationState: any): void {
+    this.conversationStates.set(telegramId, conversationState);
+    console.log(`[Auth] Stored conversation state for user ${telegramId}: ${conversationState.step}`);
+    
+    // Auto-cleanup after 10 minutes to prevent memory leaks
+    setTimeout(() => {
+      this.conversationStates.delete(telegramId);
+      console.log(`[Auth] Auto-cleaned conversation state for user ${telegramId}`);
+    }, 10 * 60 * 1000);
+  }
+
+  /**
+   * Clear conversation state
+   */
+  clearConversationState(telegramId: number): void {
+    this.conversationStates.delete(telegramId);
+    console.log(`[Auth] Cleared conversation state for user ${telegramId}`);
   }
 
   /**
