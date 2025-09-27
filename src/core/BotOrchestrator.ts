@@ -362,6 +362,10 @@ export class BotOrchestrator {
       this.handleLinkCommand(ctx)
     );
 
+    this.bot.action('cancel_linking', (ctx) => 
+      this.handleCancelLinking(ctx)
+    );
+
     this.bot.action('spot_assets', (ctx) => 
       this.handleSpotAssetsCommand(ctx)
     );
@@ -714,6 +718,18 @@ export class BotOrchestrator {
       if (ctx.userState?.conversationState?.step === 'waiting_custom_pair' && 
           ctx.userState?.conversationState?.data?.action) {
         this.handleCustomTPSLPriceText(ctx, ctx.message.text);
+        return;
+      }
+
+      // Check if expecting API key input
+      if (ctx.userState?.conversationState?.step === 'waiting_api_key') {
+        this.handleApiKeyInput(ctx, ctx.message.text);
+        return;
+      }
+
+      // Check if expecting API secret input
+      if (ctx.userState?.conversationState?.step === 'waiting_api_secret') {
+        this.handleApiSecretInput(ctx, ctx.message.text);
         return;
       }
 
@@ -1133,7 +1149,224 @@ Contact @AsterDEX\\_Support or visit docs.aster.exchange for detailed guides.
    * Handle link API command
    */
   private async handleLinkCommand(ctx: BotContext): Promise<void> {
-    await ctx.reply('🔗 **API Linking**\n\nPlease use the Link API button in the main menu to securely link your credentials.\n\nUse /menu to access the main menu.');
+    // Check if already linked
+    if (ctx.userState?.isLinked) {
+      await ctx.reply(
+        '✅ **API Already Linked**\n\n' +
+        'Your API credentials are already connected.\n\n' +
+        '**Options:**\n' +
+        '• Use /unlink to disconnect current API\n' +
+        '• Use /menu to access trading features',
+        { parse_mode: 'Markdown' }
+      );
+      return;
+    }
+
+    // Initialize conversation state for API linking
+    if (!ctx.userState) {
+      ctx.userState = {
+        userId: 0,
+        telegramId: ctx.from?.id || 0,
+        isLinked: false,
+        settings: {
+          user_id: 0,
+          leverage_cap: 100,
+          default_leverage: 10,
+          size_presets: [25, 50, 100],
+          slippage_bps: 50,
+          tp_presets: [5, 10, 15],
+          sl_presets: [5, 10, 15],
+          daily_loss_cap: 500,
+          pin_hash: null
+        }
+      };
+    }
+
+    // Set conversation state to wait for API key
+    ctx.userState.conversationState = {
+      step: 'waiting_api_key',
+      data: { pendingAction: 'link' }
+    };
+
+    const linkingText = [
+      '🔗 **API Linking Process**',
+      '',
+      '🔒 **Step 1: API Key**',
+      '',
+      'Please send your Aster DEX API Key.',
+      '',
+      '**How to get your API Key:**',
+      '1. Visit aster.exchange',
+      '2. Go to Account → API Management',
+      '3. Create new API key with trading permissions',
+      '',
+      '⚠️ **Security Note:**',
+      '• Your keys are encrypted before storage',
+      '• Never share your API keys with anyone',
+      '• You can unlink anytime with /unlink',
+      '',
+      '📝 **Send your API Key now:**'
+    ].join('\n');
+
+    await ctx.reply(linkingText, { 
+      parse_mode: 'Markdown',
+      ...Markup.inlineKeyboard([
+        [Markup.button.callback('❌ Cancel', 'cancel_linking')]
+      ])
+    });
+  }
+
+  /**
+   * Handle cancel linking
+   */
+  private async handleCancelLinking(ctx: BotContext): Promise<void> {
+    // Clear conversation state
+    if (ctx.userState) {
+      ctx.userState.conversationState = undefined;
+    }
+
+    await ctx.editMessageText(
+      '❌ **API Linking Cancelled**\n\n' +
+      'You can start the linking process again anytime by clicking the Link API button.',
+      { parse_mode: 'Markdown' }
+    );
+  }
+
+  /**
+   * Handle API key input
+   */
+  private async handleApiKeyInput(ctx: BotContext, apiKey: string): Promise<void> {
+    try {
+      // Basic validation
+      const trimmedKey = apiKey.trim();
+      if (trimmedKey.length < 10) {
+        await ctx.reply(
+          '❌ **Invalid API Key**\n\n' +
+          'API key seems too short. Please check and send your correct API key.',
+          { parse_mode: 'Markdown' }
+        );
+        return;
+      }
+
+      // Store API key temporarily and move to next step
+      if (!ctx.userState?.conversationState?.data) {
+        ctx.userState!.conversationState!.data = {};
+      }
+      ctx.userState!.conversationState!.data!.apiKey = trimmedKey;
+      ctx.userState!.conversationState!.step = 'waiting_api_secret';
+
+      const secretText = [
+        '🔒 **Step 2: API Secret**',
+        '',
+        'Great! Now please send your API Secret.',
+        '',
+        '⚠️ **Security Reminder:**',
+        '• API secrets are longer than API keys',
+        '• Make sure to copy the complete secret',
+        '• This will be encrypted before storage',
+        '',
+        '📝 **Send your API Secret now:**'
+      ].join('\n');
+
+      await ctx.reply(secretText, { 
+        parse_mode: 'Markdown',
+        ...Markup.inlineKeyboard([
+          [Markup.button.callback('❌ Cancel', 'cancel_linking')]
+        ])
+      });
+
+    } catch (error) {
+      console.error('API key input error:', error);
+      await ctx.reply('❌ Error processing API key. Please try again.');
+    }
+  }
+
+  /**
+   * Handle API secret input
+   */
+  private async handleApiSecretInput(ctx: BotContext, apiSecret: string): Promise<void> {
+    try {
+      // Basic validation
+      const trimmedSecret = apiSecret.trim();
+      if (trimmedSecret.length < 20) {
+        await ctx.reply(
+          '❌ **Invalid API Secret**\n\n' +
+          'API secret seems too short. Please check and send your correct API secret.',
+          { parse_mode: 'Markdown' }
+        );
+        return;
+      }
+
+      const apiKey = ctx.userState?.conversationState?.data?.apiKey;
+      if (!apiKey) {
+        await ctx.reply('❌ API key lost. Please start the linking process again.');
+        return;
+      }
+
+      // Show progress message
+      await ctx.reply('⏳ **Testing API Credentials...**\n\nPlease wait while we verify your API keys.', { 
+        parse_mode: 'Markdown' 
+      });
+
+      // Test the API credentials
+      const testClient = new (await import('../aster')).AsterApiClient(
+        this.config.aster.baseUrl,
+        apiKey,
+        trimmedSecret,
+        false
+      );
+
+      // Test with account info call
+      await testClient.getAccount();
+
+      // Save credentials to database
+      const userService = await this.userService.getUserOrCreate(ctx.from!.id);
+      await this.credentialsService.saveCredentials(userService.id, apiKey, trimmedSecret);
+
+      // Update user state
+      ctx.userState!.isLinked = true;
+      ctx.userState!.userId = userService.id;
+      ctx.userState!.conversationState = undefined;
+
+      // Success message
+      const successText = [
+        '✅ **API Successfully Linked!**',
+        '',
+        '🎉 Your Aster DEX API credentials have been securely connected.',
+        '',
+        '**What you can do now:**',
+        '• View your account balance',
+        '• Place spot and futures trades',
+        '• Manage positions and orders',
+        '• Set stop-loss and take-profit orders',
+        '',
+        '🚀 Ready to start trading!'
+      ].join('\n');
+
+      await ctx.reply(successText, { 
+        parse_mode: 'Markdown',
+        ...Markup.inlineKeyboard([
+          [Markup.button.callback('📊 View Balance', 'balance')],
+          [Markup.button.callback('🏠 Main Menu', 'main_menu')]
+        ])
+      });
+
+    } catch (error: any) {
+      console.error('API secret validation error:', error);
+      
+      // Clear conversation state
+      if (ctx.userState) {
+        ctx.userState.conversationState = undefined;
+      }
+
+      const errorMessage = error.message || 'Unknown error';
+      await ctx.reply(
+        '❌ **API Verification Failed**\n\n' +
+        `Error: ${errorMessage}\n\n` +
+        'Please check your credentials and try again with /link',
+        { parse_mode: 'Markdown' }
+      );
+    }
   }
 
   /**
