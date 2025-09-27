@@ -141,7 +141,7 @@ export class TradingHandler extends BaseHandler {
 
 
   private async showSpotTradingInterface(ctx: BotContext, availableUsdt: number): Promise<void> {
-    const symbolService = await this.getSymbolService(ctx.userState!.userId);
+    const symbolService = await this.getSymbolService(ctx.userState?.userId || 0);
     const topSpotSymbols = await symbolService.getTopSymbolsByVolume(4, 'spot');
 
     let spotText = `
@@ -220,7 +220,7 @@ export class TradingHandler extends BaseHandler {
     portfolioSummary: any
   ): Promise<void> {
     const totalWallet = portfolioSummary.totalWalletBalance;
-    const symbolService = await this.getSymbolService(ctx.userState!.userId);
+    const symbolService = await this.getSymbolService(ctx.userState?.userId || 0);
     const topFuturesSymbols = await symbolService.getTopSymbolsByVolume(3, 'futures');
 
     let perpsText = `

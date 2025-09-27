@@ -41,8 +41,8 @@ Welcome to Aster DEX Trading Bot! Choose an option below:
         this.eventEmitter.emitEvent({
           type: EventTypes.INTERFACE_LOADED,
           timestamp: new Date(),
-          userId: ctx.userState!.userId,
-          telegramId: ctx.userState!.telegramId,
+          userId: ctx.userState?.userId || 0,
+          telegramId: ctx.userState?.telegramId || ctx.from?.id || 0,
           correlationId: ctx.correlationId,
           from: 'unknown',
           to: 'main_menu'
