@@ -809,22 +809,44 @@ export class BotOrchestrator {
   }
 
   /**
-   * Safely edit message text with fallback to new message
+   * Safely edit message text with smart fallback logic
+   * Prefers new messages to keep updates visible at bottom of chat
    */
   private async safeEditMessageText(ctx: BotContext, text: string, options: any): Promise<void> {
+    // Check if message is recent (less than 30 seconds old)
+    const messageAge = ctx.callbackQuery?.message?.date ? 
+      (Date.now() / 1000) - ctx.callbackQuery.message.date : 0;
+    
+    const isRecentMessage = messageAge < 30; // 30 seconds threshold
+    
     try {
-      await ctx.editMessageText(text, options);
-    } catch (error: any) {
-      if (error.description?.includes("message can't be edited")) {
-        console.log('[Bot] Message too old to edit, sending new message instead');
+      if (isRecentMessage) {
+        // Try editing recent messages for smoother UX
         try {
-          await ctx.reply(text, options);
-        } catch (replyError) {
-          console.error('[Bot] Failed to send fallback message:', replyError);
-          await ctx.reply('❌ Unable to load content. Please try again.');
+          await ctx.editMessageText(text, options);
+          return;
+        } catch (editError: any) {
+          if (editError.description?.includes("message can't be edited")) {
+            console.log('[Bot] Message too old to edit, sending new message');
+          } else {
+            throw editError;
+          }
         }
-      } else {
-        throw error;
+      }
+      
+      // For older messages or edit failures, send new message
+      // This ensures updates are always visible at bottom of chat
+      
+      // Add a small indicator that this is an updated message
+      const updatedText = text + '\n\n🔄 *Updated*';
+      await ctx.reply(updatedText, options);
+      
+    } catch (error: any) {
+      console.error('[Bot] Failed to send message:', error);
+      try {
+        await ctx.reply('❌ Unable to load content. Please try again.');
+      } catch (fallbackError) {
+        console.error('[Bot] Failed to send fallback message:', fallbackError);
       }
     }
   }
