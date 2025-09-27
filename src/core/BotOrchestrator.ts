@@ -1208,14 +1208,14 @@ Contact @AsterDEX\\_Support or visit docs.aster.exchange for detailed guides.
 
     // Set conversation state to wait for API key
     const conversationState = {
-      step: 'waiting_api_key',
-      data: { pendingAction: 'link' }
+      step: 'waiting_api_key' as const,
+      data: { pendingAction: 'link' as const }
     };
     
     ctx.userState.conversationState = conversationState;
     
     // Store in middleware for persistence across requests
-    this.authMiddleware.setConversationState(ctx.userState.telegramId, conversationState);
+    await this.authMiddleware.setConversationState(ctx.userState.telegramId, conversationState);
     
     console.log(`[Link] Set conversation state for user ${ctx.userState.telegramId}: waiting_api_key`);
 
@@ -1254,7 +1254,7 @@ Contact @AsterDEX\\_Support or visit docs.aster.exchange for detailed guides.
     // Clear conversation state
     if (ctx.userState) {
       ctx.userState.conversationState = undefined;
-      this.authMiddleware.clearConversationState(ctx.userState.telegramId);
+      await this.authMiddleware.clearConversationState(ctx.userState.telegramId);
     }
 
     await ctx.editMessageText(
@@ -1288,7 +1288,7 @@ Contact @AsterDEX\\_Support or visit docs.aster.exchange for detailed guides.
       ctx.userState!.conversationState!.step = 'waiting_api_secret';
       
       // Update stored conversation state
-      this.authMiddleware.setConversationState(ctx.userState.telegramId, ctx.userState.conversationState);
+      await this.authMiddleware.setConversationState(ctx.userState!.telegramId, ctx.userState!.conversationState);
 
       const secretText = [
         '🔒 **Step 2: API Secret**',
@@ -1352,10 +1352,13 @@ Contact @AsterDEX\\_Support or visit docs.aster.exchange for detailed guides.
       );
 
       // Test with account info call
-      await testClient.getAccount();
+      await testClient.getAccountInfo();
 
       // Save credentials to database
-      const user = await this.db.getUserOrCreate(ctx.from!.id);
+      let user = await this.db.getUserByTelegramId(ctx.from!.id);
+      if (!user) {
+        user = await this.db.createUser(ctx.from!.id);
+      }
       const encryptedKey = this.encryption.encrypt(apiKey);
       const encryptedSecret = this.encryption.encrypt(trimmedSecret);
       await this.db.storeApiCredentials(user.id, encryptedKey, encryptedSecret);
@@ -1366,7 +1369,7 @@ Contact @AsterDEX\\_Support or visit docs.aster.exchange for detailed guides.
       ctx.userState!.conversationState = undefined;
       
       // Clear stored conversation state
-      this.authMiddleware.clearConversationState(ctx.userState.telegramId);
+      await this.authMiddleware.clearConversationState(ctx.userState!.telegramId);
 
       // Success message
       const successText = [
@@ -1397,7 +1400,7 @@ Contact @AsterDEX\\_Support or visit docs.aster.exchange for detailed guides.
       // Clear conversation state
       if (ctx.userState) {
         ctx.userState.conversationState = undefined;
-        this.authMiddleware.clearConversationState(ctx.userState.telegramId);
+        await this.authMiddleware.clearConversationState(ctx.userState.telegramId);
       }
 
       const errorMessage = error.message || 'Unknown error';

@@ -11,7 +11,6 @@ export interface BotContext extends Context {
 export class AuthMiddleware {
   private db: DatabaseManager;
   private eventEmitter: BotEventEmitter;
-  private conversationStates: Map<number, any> = new Map(); // Temporary conversation state storage
 
   constructor(db: DatabaseManager, eventEmitter: BotEventEmitter) {
     this.db = db;
@@ -43,13 +42,15 @@ export class AuthMiddleware {
         // Load or create user state
         ctx.userState = await this.loadUserState(telegramId);
         
-        // Restore conversation state from temporary storage
-        const storedConversationState = this.conversationStates.get(telegramId);
-        if (storedConversationState && ctx.userState) {
-          ctx.userState.conversationState = storedConversationState;
-          console.log(`[Auth] Restored conversation state: ${storedConversationState.step}`);
-        } else {
-          console.log(`[Auth] No stored conversation state for user ${telegramId}`);
+        // Restore conversation state from database
+        if (ctx.userState) {
+          const storedConversationState = await this.db.getConversationState(ctx.userState.userId);
+          if (storedConversationState) {
+            ctx.userState.conversationState = storedConversationState;
+            console.log(`[Auth] Restored conversation state: ${storedConversationState.step}`);
+          } else {
+            console.log(`[Auth] No stored conversation state for user ${telegramId}`);
+          }
         }
         
         if (ctx.userState) {
@@ -73,25 +74,33 @@ export class AuthMiddleware {
   }
 
   /**
-   * Store conversation state temporarily
+   * Store conversation state in database
    */
-  setConversationState(telegramId: number, conversationState: any): void {
-    this.conversationStates.set(telegramId, conversationState);
-    console.log(`[Auth] Stored conversation state for user ${telegramId}: ${conversationState.step}`);
-    
-    // Auto-cleanup after 10 minutes to prevent memory leaks
-    setTimeout(() => {
-      this.conversationStates.delete(telegramId);
-      console.log(`[Auth] Auto-cleaned conversation state for user ${telegramId}`);
-    }, 10 * 60 * 1000);
+  async setConversationState(telegramId: number, conversationState: any): Promise<void> {
+    try {
+      const user = await this.db.getUserByTelegramId(telegramId);
+      if (user) {
+        await this.db.setConversationState(user.id, conversationState, 10); // 10 minutes TTL
+        console.log(`[Auth] Stored conversation state for user ${telegramId}: ${conversationState.step}`);
+      }
+    } catch (error) {
+      console.error(`[Auth] Failed to store conversation state for user ${telegramId}:`, error);
+    }
   }
 
   /**
-   * Clear conversation state
+   * Clear conversation state from database
    */
-  clearConversationState(telegramId: number): void {
-    this.conversationStates.delete(telegramId);
-    console.log(`[Auth] Cleared conversation state for user ${telegramId}`);
+  async clearConversationState(telegramId: number): Promise<void> {
+    try {
+      const user = await this.db.getUserByTelegramId(telegramId);
+      if (user) {
+        await this.db.deleteConversationState(user.id);
+        console.log(`[Auth] Cleared conversation state for user ${telegramId}`);
+      }
+    } catch (error) {
+      console.error(`[Auth] Failed to clear conversation state for user ${telegramId}:`, error);
+    }
   }
 
   /**
