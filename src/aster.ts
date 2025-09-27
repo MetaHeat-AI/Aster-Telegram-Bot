@@ -392,10 +392,13 @@ export class AsterApiClient {
         return response.data;
       } catch (error: any) {
         lastError = error;
-        console.log(`[API] Endpoint ${endpoint} failed:`, error.response?.status || error.message);
+        console.log(`[API] Endpoint ${endpoint} failed:`, error.response?.status || error.code || error.message);
+        
+        // Check for 404 errors (either raw response or transformed error code)
+        const is404Error = error.response?.status === 404 || error.code === 'NOT_FOUND';
         
         // If it's not a 404, throw the error (might be auth, rate limit, etc.)
-        if (error.response?.status !== 404) {
+        if (!is404Error) {
           throw error;
         }
         
