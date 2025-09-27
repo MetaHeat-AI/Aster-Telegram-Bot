@@ -366,6 +366,14 @@ export class BotOrchestrator {
       this.handleCancelLinking(ctx)
     );
 
+    this.bot.action('confirm_unlink', (ctx) => 
+      this.handleConfirmUnlink(ctx)
+    );
+
+    this.bot.action('cancel_unlink', (ctx) => 
+      this.handleCancelUnlink(ctx)
+    );
+
     this.bot.action('spot_assets', (ctx) => 
       this.handleSpotAssetsCommand(ctx)
     );
@@ -1397,11 +1405,114 @@ Contact @AsterDEX\\_Support or visit docs.aster.exchange for detailed guides.
     }
     
     try {
-      // For now, just notify the user - implement actual unlinking later
-      await ctx.reply('✅ **API Credentials Unlinked**\n\nYour API credentials have been safely removed from our system.\n\n(Implementation pending)');
+      // Show confirmation prompt
+      const confirmText = [
+        '⚠️ **Confirm API Unlink**',
+        '',
+        'Are you sure you want to unlink your API credentials?',
+        '',
+        '**This will:**',
+        '• Remove your encrypted API keys from our database',
+        '• Disable all trading functionality', 
+        '• Require re-linking to trade again',
+        '',
+        '**This action cannot be undone.**'
+      ].join('\n');
+
+      await ctx.reply(confirmText, {
+        parse_mode: 'Markdown',
+        ...Markup.inlineKeyboard([
+          [
+            Markup.button.callback('✅ Yes, Unlink', 'confirm_unlink'),
+            Markup.button.callback('❌ Cancel', 'cancel_unlink')
+          ]
+        ])
+      });
+
     } catch (error) {
-      await ctx.reply('❌ Failed to unlink credentials. Please try again.');
+      console.error('Unlink command error:', error);
+      await ctx.reply('❌ Failed to process unlink request. Please try again.');
     }
+  }
+
+  /**
+   * Handle confirm unlink
+   */
+  private async handleConfirmUnlink(ctx: BotContext): Promise<void> {
+    try {
+      if (!ctx.userState?.isLinked) {
+        await ctx.editMessageText('❌ No API credentials are currently linked.', { parse_mode: 'Markdown' });
+        return;
+      }
+
+      // Show processing message
+      await ctx.editMessageText('⏳ **Unlinking API Credentials...**\n\nRemoving your credentials from our database...', { 
+        parse_mode: 'Markdown' 
+      });
+
+      // Remove credentials from database
+      await this.credentialsService.deleteCredentials(ctx.userState.userId);
+
+      // Update user state
+      ctx.userState.isLinked = false;
+      ctx.userState.userId = 0;
+
+      // Success message
+      const successText = [
+        '✅ **API Credentials Successfully Unlinked**',
+        '',
+        '🔒 Your API credentials have been safely removed from our system.',
+        '',
+        '**What happened:**',
+        '• Encrypted API keys deleted from database',
+        '• All trading functionality disabled',
+        '• Session cleared and reset',
+        '',
+        '💡 **Next Steps:**',
+        '• Use /link to connect API credentials again',
+        '• Use /menu to explore other features'
+      ].join('\n');
+
+      await ctx.editMessageText(successText, { 
+        parse_mode: 'Markdown',
+        ...Markup.inlineKeyboard([
+          [
+            Markup.button.callback('🔗 Link API Again', 'link_api'),
+            Markup.button.callback('🏠 Main Menu', 'main_menu')
+          ]
+        ])
+      });
+
+      // Emit unlink event
+      this.eventEmitter.emitEvent({
+        type: EventTypes.USER_UNLINKED,
+        timestamp: new Date(),
+        userId: ctx.userState.userId,
+        telegramId: ctx.userState.telegramId,
+        correlationId: ctx.correlationId
+      });
+
+    } catch (error: any) {
+      console.error('Confirm unlink error:', error);
+      await ctx.editMessageText(
+        '❌ **Unlink Failed**\n\n' +
+        `Error: ${error.message || 'Unknown error'}\n\n` +
+        'Please try again or contact support.',
+        { parse_mode: 'Markdown' }
+      );
+    }
+  }
+
+  /**
+   * Handle cancel unlink
+   */
+  private async handleCancelUnlink(ctx: BotContext): Promise<void> {
+    await ctx.editMessageText(
+      '❌ **Unlink Cancelled**\n\n' +
+      'Your API credentials remain linked and secure.\n\n' +
+      'Use /unlink again if you change your mind.',
+      { parse_mode: 'Markdown' }
+    );
   }
 
   /**
