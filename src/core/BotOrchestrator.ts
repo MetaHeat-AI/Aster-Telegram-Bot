@@ -4266,7 +4266,7 @@ Contact @AsterDEX\\_Support or visit docs.aster.exchange for detailed guides.
         ]
       ]);
 
-      await ctx.editMessageText(tpslText, { parse_mode: 'Markdown', ...keyboard });
+      await this.safeEditMessageText(ctx, tpslText, { parse_mode: 'Markdown', ...keyboard });
     } catch (error) {
       console.error('Perps TP/SL selection error:', error);
       await ctx.reply('❌ Failed to load TP/SL options. Please try again.');
@@ -4401,91 +4401,103 @@ Contact @AsterDEX\\_Support or visit docs.aster.exchange for detailed guides.
     try {
       const apiClient = await this.apiClientService.getOrCreateClient(ctx.userState!.userId);
       
+      // Wait a moment for the main order to be filled and position to be updated
+      await new Promise(resolve => setTimeout(resolve, 1000));
+      
       // Get current position to calculate TP/SL prices
-      const FuturesAccountService = await import('../services/FuturesAccountService');
-      const futuresService = new FuturesAccountService.FuturesAccountService(apiClient);
-      const position = await futuresService.getPosition(symbol);
+      const positions = await apiClient.getPositionRisk();
+      const position = positions.find((p: any) => p.symbol === symbol && parseFloat(p.positionAmt) !== 0);
       
       if (!position) {
-        await ctx.reply('⚠️ Position not found. TP/SL orders could not be placed.');
+        await ctx.reply('⚠️ Position not found. TP/SL orders could not be placed. Please set them manually from positions menu.');
         return;
       }
 
-      const entryPrice = position.entryPrice;
+      const entryPrice = parseFloat(position.entryPrice);
       let tpOrderResult = null;
       let slOrderResult = null;
+      const results = [];
 
-      // Place Take Profit order
+      // Place Take Profit order using dedicated API method
       if (tpValue) {
         const tpPrice = side === 'BUY' ? 
           entryPrice * (1 + tpValue / 100) : 
           entryPrice * (1 - tpValue / 100);
         
         try {
-          const tpSide = side === 'BUY' ? 'SELL' : 'BUY';
-          
-          // Use createOrder for take profit orders
-          try {
-            tpOrderResult = await apiClient.createOrder({
-              symbol,
-              side: tpSide,
-              type: 'TAKE_PROFIT_MARKET',
-              stopPrice: tpPrice.toString(),
-              quantity: position.size.toString(),
-              timeInForce: 'GTC'
-            });
-          } catch (tpError) {
-            console.error('Take profit order placement failed:', tpError);
-          }
-        } catch (error) {
-          console.error('TP order placement error:', error);
+          tpOrderResult = await apiClient.setTakeProfit(symbol, tpPrice);
+          results.push(`🎯 **Take Profit:** ${tpValue}% @ $${tpPrice.toFixed(6)} (ID: ${tpOrderResult.orderId})`);
+        } catch (tpError: any) {
+          console.error('Take profit order placement failed:', tpError);
+          results.push(`❌ **Take Profit Failed:** ${tpError.message || 'Unknown error'}`);
         }
       }
 
-      // Place Stop Loss order
+      // Place Stop Loss order using dedicated API method
       if (slValue) {
         const slPrice = side === 'BUY' ? 
           entryPrice * (1 - slValue / 100) : 
           entryPrice * (1 + slValue / 100);
         
         try {
-          const slSide = side === 'BUY' ? 'SELL' : 'BUY';
-          
-          // Use createOrder for stop loss orders
-          try {
-            slOrderResult = await apiClient.createOrder({
-              symbol,
-              side: slSide,
-              type: 'STOP_MARKET',
-              stopPrice: slPrice.toString(),
-              quantity: position.size.toString(),
-              timeInForce: 'GTC'
-            });
-          } catch (slError) {
-            console.error('Stop loss order placement failed:', slError);
-          }
-        } catch (error) {
-          console.error('SL order placement error:', error);
+          slOrderResult = await apiClient.setStopLoss(symbol, slPrice);
+          results.push(`🛡️ **Stop Loss:** ${slValue}% @ $${slPrice.toFixed(6)} (ID: ${slOrderResult.orderId})`);
+        } catch (slError: any) {
+          console.error('Stop loss order placement failed:', slError);
+          results.push(`❌ **Stop Loss Failed:** ${slError.message || 'Unknown error'}`);
         }
       }
 
-      // Send confirmation message
-      let confirmText = '✅ **Risk Management Orders Placed**\n\n';
+      // Send comprehensive confirmation message
+      let confirmText = '';
+      if (tpOrderResult || slOrderResult) {
+        confirmText = `✅ **Risk Management Orders Placed**\n\n${results.join('\n')}\n\n⚠️ *Orders are active and will execute automatically when price targets are reached.*`;
+      } else {
+        confirmText = `⚠️ **TP/SL Orders Failed**\n\n${results.join('\n')}\n\n💡 *You can set them manually from the positions menu.*`;
+      }
+
+      const keyboard = Markup.inlineKeyboard([
+        [
+          Markup.button.callback('📊 View Position', `position_${symbol}`),
+          Markup.button.callback('📈 New Trade', 'unified_trade')
+        ],
+        [
+          Markup.button.callback('🏠 Main Menu', 'main_menu')
+        ]
+      ]);
+
+      await ctx.reply(confirmText, { parse_mode: 'Markdown', ...keyboard });
+
+      // Emit events for successful orders
       if (tpOrderResult) {
-        confirmText += `🎯 **Take Profit:** ${tpValue}% set\n`;
+        this.eventEmitter.emitEvent({
+          type: EventTypes.TRADE_EXECUTED,
+          timestamp: new Date(),
+          userId: ctx.userState!.userId,
+          telegramId: ctx.userState!.telegramId,
+          correlationId: ctx.correlationId,
+          symbol,
+          action: 'TAKE_PROFIT',
+          orderId: tpOrderResult.orderId
+        });
       }
+
       if (slOrderResult) {
-        confirmText += `🛑 **Stop Loss:** ${slValue}% set\n`;
-      }
-      if (!tpOrderResult && !slOrderResult) {
-        confirmText = '⚠️ **Could not place TP/SL orders.** Your main position is still active.';
+        this.eventEmitter.emitEvent({
+          type: EventTypes.TRADE_EXECUTED,
+          timestamp: new Date(),
+          userId: ctx.userState!.userId,
+          telegramId: ctx.userState!.telegramId,
+          correlationId: ctx.correlationId,
+          symbol,
+          action: 'STOP_LOSS',
+          orderId: slOrderResult.orderId
+        });
       }
 
-      await ctx.reply(confirmText, { parse_mode: 'Markdown' });
-
-    } catch (error) {
+    } catch (error: any) {
       console.error('TP/SL order placement error:', error);
-      await ctx.reply('⚠️ Main trade executed but TP/SL orders could not be placed.');
+      await ctx.reply(`⚠️ **TP/SL Orders Failed**\n\n**Error:** ${error.message || 'Unknown error'}\n\n💡 *Your main trade was executed successfully. Set TP/SL manually from positions menu.*`);
     }
   }
 
