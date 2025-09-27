@@ -464,19 +464,90 @@ export class BotOrchestrator {
     amount: number
   ): Promise<void> {
     try {
+      if (!ctx.userState?.isLinked) {
+        await ctx.answerCbQuery('❌ Please link your API credentials first!');
+        await ctx.reply('❌ Please link your API credentials first using /link');
+        return;
+      }
+
       const action = side === 'BUY' ? 'Buy' : 'Sell';
       const emoji = side === 'BUY' ? '🟢' : '🔴';
       
-      await ctx.answerCbQuery(`${emoji} ${action} ${symbol} $${amount} - Coming soon!`);
-      await ctx.reply(
-        `${emoji} **Spot ${action} Order**\n\n` +
+      await ctx.answerCbQuery(`${emoji} Executing ${action} ${symbol} $${amount}...`);
+      
+      // Show processing message
+      const processingMsg = await ctx.reply(
+        `${emoji} **Processing Spot ${action} Order**\n\n` +
         `**Symbol:** ${symbol}\n` +
         `**Amount:** $${amount}\n` +
-        `**Type:** ${action}\n\n` +
-        `🚧 Trade execution feature coming soon!\n\n` +
-        `🔙 Use /menu to return to main menu.`,
+        `**Type:** Market ${action}\n\n` +
+        `⏳ Executing trade...`,
         { parse_mode: 'Markdown' }
       );
+
+      try {
+        // Get API client for user
+        const apiClient = await this.apiClientService.getOrCreateClient(ctx.userState.userId);
+        
+        // Calculate quantity based on USDT amount
+        const currentPrice = await this.priceService.getCurrentPrice(symbol);
+        const quantity = (amount / currentPrice).toFixed(8);
+
+        // Execute the trade
+        const orderResult = await apiClient.createOrder({
+          symbol,
+          side,
+          type: 'MARKET',
+          quantity: side === 'BUY' ? quantity : undefined,
+          quoteOrderQty: side === 'BUY' ? amount.toString() : undefined
+        });
+
+        // Success message
+        await ctx.telegram.editMessageText(
+          ctx.chat?.id,
+          processingMsg.message_id,
+          undefined,
+          `✅ **Spot ${action} Order Executed**\n\n` +
+          `**Symbol:** ${symbol}\n` +
+          `**Amount:** $${amount}\n` +
+          `**Quantity:** ${orderResult.executedQty}\n` +
+          `**Price:** $${orderResult.avgPrice || currentPrice.toFixed(6)}\n` +
+          `**Order ID:** ${orderResult.orderId}\n\n` +
+          `🎉 Trade completed successfully!\n\n` +
+          `🔙 Use /menu to return to main menu.`,
+          { parse_mode: 'Markdown' }
+        );
+
+        this.eventEmitter.emitEvent({
+          type: EventTypes.TRADE_EXECUTED,
+          timestamp: new Date(),
+          userId: ctx.userState.userId,
+          telegramId: ctx.userState.telegramId,
+          correlationId: ctx.correlationId,
+          symbol,
+          action: side,
+          amount,
+          orderId: orderResult.orderId
+        });
+
+      } catch (tradeError: any) {
+        console.error('[Orchestrator] Spot trade execution failed:', tradeError);
+        
+        // Show error message
+        await ctx.telegram.editMessageText(
+          ctx.chat?.id,
+          processingMsg.message_id,
+          undefined,
+          `❌ **Spot ${action} Order Failed**\n\n` +
+          `**Symbol:** ${symbol}\n` +
+          `**Amount:** $${amount}\n` +
+          `**Error:** ${tradeError.message || 'Unknown error'}\n\n` +
+          `🔄 Please try again or contact support.\n\n` +
+          `🔙 Use /menu to return to main menu.`,
+          { parse_mode: 'Markdown' }
+        );
+      }
+
     } catch (error) {
       console.error('[Orchestrator] Spot execute action error:', error);
       this.eventEmitter.emitEvent({
@@ -502,20 +573,97 @@ export class BotOrchestrator {
     leverage: number
   ): Promise<void> {
     try {
+      if (!ctx.userState?.isLinked) {
+        await ctx.answerCbQuery('❌ Please link your API credentials first!');
+        await ctx.reply('❌ Please link your API credentials first using /link');
+        return;
+      }
+
       const action = side === 'BUY' ? 'Long' : 'Short';
       const emoji = side === 'BUY' ? '📈' : '📉';
       
-      await ctx.answerCbQuery(`${emoji} ${action} ${symbol} $${amount} ${leverage}x - Coming soon!`);
-      await ctx.reply(
-        `${emoji} **Perps ${action} Order**\n\n` +
+      await ctx.answerCbQuery(`${emoji} Executing ${action} ${symbol} $${amount} ${leverage}x...`);
+      
+      // Show processing message
+      const processingMsg = await ctx.reply(
+        `${emoji} **Processing Perps ${action} Order**\n\n` +
         `**Symbol:** ${symbol}\n` +
         `**Amount:** $${amount}\n` +
         `**Leverage:** ${leverage}x\n` +
-        `**Type:** ${action}\n\n` +
-        `🚧 Trade execution feature coming soon!\n\n` +
-        `🔙 Use /menu to return to main menu.`,
+        `**Type:** Market ${action}\n\n` +
+        `⏳ Setting leverage and executing trade...`,
         { parse_mode: 'Markdown' }
       );
+
+      try {
+        // Get API client for user
+        const apiClient = await this.apiClientService.getOrCreateClient(ctx.userState.userId);
+        
+        // Set leverage first
+        await apiClient.changeLeverage(symbol, leverage);
+        
+        // Calculate quantity based on USDT amount and leverage
+        const currentPrice = await this.priceService.getCurrentPrice(symbol);
+        const totalNotional = amount * leverage;
+        const quantity = (totalNotional / currentPrice).toFixed(8);
+
+        // Execute the trade
+        const orderResult = await apiClient.createOrder({
+          symbol,
+          side,
+          type: 'MARKET',
+          quantity
+        });
+
+        // Success message
+        await ctx.telegram.editMessageText(
+          ctx.chat?.id,
+          processingMsg.message_id,
+          undefined,
+          `✅ **Perps ${action} Order Executed**\n\n` +
+          `**Symbol:** ${symbol}\n` +
+          `**Margin:** $${amount}\n` +
+          `**Leverage:** ${leverage}x\n` +
+          `**Position Size:** ${orderResult.executedQty}\n` +
+          `**Entry Price:** $${orderResult.avgPrice || currentPrice.toFixed(6)}\n` +
+          `**Order ID:** ${orderResult.orderId}\n\n` +
+          `🎉 Position opened successfully!\n\n` +
+          `🔙 Use /menu to return to main menu.`,
+          { parse_mode: 'Markdown' }
+        );
+
+        this.eventEmitter.emitEvent({
+          type: EventTypes.TRADE_EXECUTED,
+          timestamp: new Date(),
+          userId: ctx.userState.userId,
+          telegramId: ctx.userState.telegramId,
+          correlationId: ctx.correlationId,
+          symbol,
+          action: side,
+          amount,
+          leverage,
+          orderId: orderResult.orderId
+        });
+
+      } catch (tradeError: any) {
+        console.error('[Orchestrator] Perps trade execution failed:', tradeError);
+        
+        // Show error message
+        await ctx.telegram.editMessageText(
+          ctx.chat?.id,
+          processingMsg.message_id,
+          undefined,
+          `❌ **Perps ${action} Order Failed**\n\n` +
+          `**Symbol:** ${symbol}\n` +
+          `**Amount:** $${amount}\n` +
+          `**Leverage:** ${leverage}x\n` +
+          `**Error:** ${tradeError.message || 'Unknown error'}\n\n` +
+          `🔄 Please try again or contact support.\n\n` +
+          `🔙 Use /menu to return to main menu.`,
+          { parse_mode: 'Markdown' }
+        );
+      }
+
     } catch (error) {
       console.error('[Orchestrator] Perps execute action error:', error);
       this.eventEmitter.emitEvent({
