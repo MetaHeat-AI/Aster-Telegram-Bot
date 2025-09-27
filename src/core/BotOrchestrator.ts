@@ -283,6 +283,11 @@ export class BotOrchestrator {
       this.navigationHandler.showTradingMenu(ctx)
     );
 
+    // Transfer command
+    this.bot.command('transfer', (ctx) => 
+      this.handleTransferMenu(ctx)
+    );
+
     // Panic command (admin only)
     this.bot.command('panic', (ctx) => 
       this.handlePanicCommand(ctx)
@@ -467,16 +472,26 @@ export class BotOrchestrator {
       const action = ctx.match[1];
       const symbol = ctx.match[2];
       const leverage = parseInt(ctx.match[3]);
-      this.handlePerpsAmountSelection(ctx, symbol, action.toUpperCase() as 'BUY' | 'SELL', leverage);
+      this.handlePerpsMarginModeSelection(ctx, symbol, action.toUpperCase() as 'BUY' | 'SELL', leverage);
     });
 
-    // Step 2: Amount selection for perps/spot
-    this.bot.action(/^perps_amount_(buy|sell)_([A-Z0-9]+USDT)_(\d+)x_(\d+)pct$/, (ctx) => {
+    // Step 2: Margin mode selection for perps
+    this.bot.action(/^perps_margin_(buy|sell)_([A-Z0-9]+USDT)_(\d+)x_(cross|isolated)$/, (ctx) => {
       const action = ctx.match[1];
       const symbol = ctx.match[2];
       const leverage = parseInt(ctx.match[3]);
-      const percentage = parseInt(ctx.match[4]);
-      this.handlePerpsTPSLSelection(ctx, symbol, action.toUpperCase() as 'BUY' | 'SELL', leverage, percentage, 'percentage');
+      const marginMode = ctx.match[4] as 'cross' | 'isolated';
+      this.handlePerpsAmountSelection(ctx, symbol, action.toUpperCase() as 'BUY' | 'SELL', leverage, marginMode);
+    });
+
+    // Step 3: Amount selection for perps/spot
+    this.bot.action(/^perps_amount_(buy|sell)_([A-Z0-9]+USDT)_(\d+)x_(cross|isolated)_(\d+)pct$/, (ctx) => {
+      const action = ctx.match[1];
+      const symbol = ctx.match[2];
+      const leverage = parseInt(ctx.match[3]);
+      const marginMode = ctx.match[4] as 'cross' | 'isolated';
+      const percentage = parseInt(ctx.match[5]);
+      this.handlePerpsTPSLSelection(ctx, symbol, action.toUpperCase() as 'BUY' | 'SELL', leverage, marginMode, percentage, 'percentage');
     });
 
     this.bot.action(/^spot_amount_(buy|sell)_([A-Z0-9]+USDT)_(\d+)pct$/, (ctx) => {
@@ -487,18 +502,20 @@ export class BotOrchestrator {
     });
 
     // Manual amount input handlers
-    this.bot.action(/^perps_manual_usdt_(buy|sell)_([A-Z0-9]+USDT)_(\d+)x$/, (ctx) => {
+    this.bot.action(/^perps_manual_usdt_(buy|sell)_([A-Z0-9]+USDT)_(\d+)x_(cross|isolated)$/, (ctx) => {
       const action = ctx.match[1];
       const symbol = ctx.match[2];
       const leverage = parseInt(ctx.match[3]);
-      this.handleManualUSDTInput(ctx, 'perps', symbol, action.toUpperCase() as 'BUY' | 'SELL', leverage);
+      const marginMode = ctx.match[4] as 'cross' | 'isolated';
+      this.handleManualUSDTInput(ctx, 'perps', symbol, action.toUpperCase() as 'BUY' | 'SELL', leverage, marginMode);
     });
 
-    this.bot.action(/^perps_manual_token_(buy|sell)_([A-Z0-9]+USDT)_(\d+)x$/, (ctx) => {
+    this.bot.action(/^perps_manual_token_(buy|sell)_([A-Z0-9]+USDT)_(\d+)x_(cross|isolated)$/, (ctx) => {
       const action = ctx.match[1];
       const symbol = ctx.match[2];
       const leverage = parseInt(ctx.match[3]);
-      this.handleManualTokenInput(ctx, 'perps', symbol, action.toUpperCase() as 'BUY' | 'SELL', leverage);
+      const marginMode = ctx.match[4] as 'cross' | 'isolated';
+      this.handleManualTokenInput(ctx, 'perps', symbol, action.toUpperCase() as 'BUY' | 'SELL', leverage, marginMode);
     });
 
     this.bot.action(/^spot_manual_usdt_(buy|sell)_([A-Z0-9]+USDT)$/, (ctx) => {
@@ -514,15 +531,16 @@ export class BotOrchestrator {
     });
 
     // TP/SL selection handlers
-    this.bot.action(/^perps_tpsl_(buy|sell)_([A-Z0-9]+USDT)_(\d+)x_(\d+|\d+\.\d+)_(percentage|usdt|token)_tp(\d+|\d+\.\d+|none)_sl(\d+|\d+\.\d+|none)$/, (ctx) => {
+    this.bot.action(/^perps_tpsl_(buy|sell)_([A-Z0-9]+USDT)_(\d+)x_(cross|isolated)_(\d+|\d+\.\d+)_(percentage|usdt|token)_tp(\d+|\d+\.\d+|none)_sl(\d+|\d+\.\d+|none)$/, (ctx) => {
       const action = ctx.match[1];
       const symbol = ctx.match[2];
       const leverage = parseInt(ctx.match[3]);
-      const amount = parseFloat(ctx.match[4]);
-      const amountType = ctx.match[5];
-      const tpValue = ctx.match[6] === 'none' ? null : parseFloat(ctx.match[6]);
-      const slValue = ctx.match[7] === 'none' ? null : parseFloat(ctx.match[7]);
-      this.handlePerpsTPSLExecute(ctx, symbol, action.toUpperCase() as 'BUY' | 'SELL', leverage, amount, amountType, tpValue, slValue);
+      const marginMode = ctx.match[4] as 'cross' | 'isolated';
+      const amount = parseFloat(ctx.match[5]);
+      const amountType = ctx.match[6];
+      const tpValue = ctx.match[7] === 'none' ? null : parseFloat(ctx.match[7]);
+      const slValue = ctx.match[8] === 'none' ? null : parseFloat(ctx.match[8]);
+      this.handlePerpsTPSLExecute(ctx, symbol, action.toUpperCase() as 'BUY' | 'SELL', leverage, marginMode, amount, amountType, tpValue, slValue);
     });
 
     this.bot.action(/^spot_tpsl_(buy|sell)_([A-Z0-9]+USDT)_(\d+|\d+\.\d+)_(percentage|usdt|token)_tp(\d+|\d+\.\d+|none)_sl(\d+|\d+\.\d+|none)$/, (ctx) => {
@@ -533,6 +551,27 @@ export class BotOrchestrator {
       const tpValue = ctx.match[5] === 'none' ? null : parseFloat(ctx.match[5]);
       const slValue = ctx.match[6] === 'none' ? null : parseFloat(ctx.match[6]);
       this.handleSpotTPSLExecute(ctx, symbol, action.toUpperCase() as 'BUY' | 'SELL', amount, amountType, tpValue, slValue);
+    });
+
+    // Account transfer handlers
+    this.bot.action('transfer_menu', (ctx) => 
+      this.handleTransferMenu(ctx)
+    );
+
+    this.bot.action(/^transfer_(spot_to_futures|futures_to_spot)$/, (ctx) => {
+      const direction = ctx.match[1] as 'spot_to_futures' | 'futures_to_spot';
+      this.handleTransferAmountSelection(ctx, direction);
+    });
+
+    this.bot.action(/^transfer_amount_(spot_to_futures|futures_to_spot)_(\d+)pct$/, (ctx) => {
+      const direction = ctx.match[1] as 'spot_to_futures' | 'futures_to_spot';
+      const percentage = parseInt(ctx.match[2]);
+      this.handleTransferExecute(ctx, direction, percentage, 'percentage');
+    });
+
+    this.bot.action(/^transfer_manual_(spot_to_futures|futures_to_spot)$/, (ctx) => {
+      const direction = ctx.match[1] as 'spot_to_futures' | 'futures_to_spot';
+      this.handleTransferManualInput(ctx, direction);
     });
 
     // Spot asset selling handlers
@@ -614,6 +653,12 @@ export class BotOrchestrator {
       // Check if expecting manual token input
       if ((ctx.userState as any)?.expectingManualToken) {
         this.handleManualTokenText(ctx, ctx.message.text);
+        return;
+      }
+
+      // Check if expecting transfer amount input
+      if (ctx.userState?.awaitingInput === 'transfer_amount') {
+        this.handleTransferAmountText(ctx, ctx.message.text);
         return;
       }
       
@@ -2502,7 +2547,7 @@ Contact @AsterDEX_Support or visit docs.aster.exchange for detailed guides.
   /**
    * Handle perps amount selection (Step 2 of trading flow)
    */
-  private async handlePerpsAmountSelection(ctx: BotContext, symbol: string, side: 'BUY' | 'SELL', leverage: number): Promise<void> {
+  private async handlePerpsAmountSelection(ctx: BotContext, symbol: string, side: 'BUY' | 'SELL', leverage: number, marginMode: 'cross' | 'isolated'): Promise<void> {
     try {
       const apiClient = await this.apiClientService.getOrCreateClient(ctx.userState!.userId);
       const FuturesAccountService = await import('../services/FuturesAccountService');
@@ -2516,31 +2561,33 @@ Contact @AsterDEX_Support or visit docs.aster.exchange for detailed guides.
       const sideText = side === 'BUY' ? 'Long' : 'Short';
       const emoji = side === 'BUY' ? '🟢' : '🔴';
       
+      const marginEmoji = marginMode === 'cross' ? '🌐' : '🔒';
       const amountText = [
         `${emoji} **${sideText} ${symbol.replace('USDT', '')} ${leverage}x**`,
+        `${marginEmoji} **Margin Mode:** ${marginMode.charAt(0).toUpperCase() + marginMode.slice(1)}`,
         `💵 **Current Price:** $${currentPrice.toFixed(6)}`,
         `💰 **Available Balance:** $${availableBalance.toFixed(2)} USDT`,
         '',
-        '🎯 **Step 2: Select Position Size**',
+        '🎯 **Step 3: Select Position Size**',
         '',
         '📊 **Quick Percentage Options:**'
       ].join('\n');
 
       const keyboard = Markup.inlineKeyboard([
         [
-          Markup.button.callback(`25% ($${(availableBalance * 0.25).toFixed(2)})`, `perps_amount_${side.toLowerCase()}_${symbol}_${leverage}x_25pct`),
-          Markup.button.callback(`50% ($${(availableBalance * 0.50).toFixed(2)})`, `perps_amount_${side.toLowerCase()}_${symbol}_${leverage}x_50pct`)
+          Markup.button.callback(`25% ($${(availableBalance * 0.25).toFixed(2)})`, `perps_amount_${side.toLowerCase()}_${symbol}_${leverage}x_${marginMode}_25pct`),
+          Markup.button.callback(`50% ($${(availableBalance * 0.50).toFixed(2)})`, `perps_amount_${side.toLowerCase()}_${symbol}_${leverage}x_${marginMode}_50pct`)
         ],
         [
-          Markup.button.callback(`75% ($${(availableBalance * 0.75).toFixed(2)})`, `perps_amount_${side.toLowerCase()}_${symbol}_${leverage}x_75pct`),
-          Markup.button.callback(`100% ($${availableBalance.toFixed(2)})`, `perps_amount_${side.toLowerCase()}_${symbol}_${leverage}x_100pct`)
+          Markup.button.callback(`75% ($${(availableBalance * 0.75).toFixed(2)})`, `perps_amount_${side.toLowerCase()}_${symbol}_${leverage}x_${marginMode}_75pct`),
+          Markup.button.callback(`100% ($${availableBalance.toFixed(2)})`, `perps_amount_${side.toLowerCase()}_${symbol}_${leverage}x_${marginMode}_100pct`)
         ],
         [
-          Markup.button.callback('💰 Enter USDT Amount', `perps_manual_usdt_${side.toLowerCase()}_${symbol}_${leverage}x`),
-          Markup.button.callback('🪙 Enter Token Amount', `perps_manual_token_${side.toLowerCase()}_${symbol}_${leverage}x`)
+          Markup.button.callback('💰 Enter USDT Amount', `perps_manual_usdt_${side.toLowerCase()}_${symbol}_${leverage}x_${marginMode}`),
+          Markup.button.callback('🪙 Enter Token Amount', `perps_manual_token_${side.toLowerCase()}_${symbol}_${leverage}x_${marginMode}`)
         ],
         [
-          Markup.button.callback('🔙 Back to Leverage', `perps_${side.toLowerCase()}_${symbol}`)
+          Markup.button.callback('🔙 Back to Margin Mode', `perps_margin_${side.toLowerCase()}_${symbol}_${leverage}x`)
         ]
       ]);
 
@@ -2680,7 +2727,7 @@ Contact @AsterDEX_Support or visit docs.aster.exchange for detailed guides.
   /**
    * Handle manual USDT input
    */
-  private async handleManualUSDTInput(ctx: BotContext, mode: 'spot' | 'perps', symbol: string, side: 'BUY' | 'SELL', leverage?: number): Promise<void> {
+  private async handleManualUSDTInput(ctx: BotContext, mode: 'spot' | 'perps', symbol: string, side: 'BUY' | 'SELL', leverage?: number, marginMode?: 'cross' | 'isolated'): Promise<void> {
     const modeText = mode === 'spot' ? 'Spot' : 'Perps';
     const sideText = side === 'BUY' ? (mode === 'spot' ? 'Buy' : 'Long') : (mode === 'spot' ? 'Sell' : 'Short');
     const leverageText = leverage ? ` ${leverage}x` : '';
@@ -2699,17 +2746,18 @@ Contact @AsterDEX_Support or visit docs.aster.exchange for detailed guides.
       '⏳ **Waiting for your input...**'
     ].join('\n');
 
+    const marginModeText = marginMode ? `_${marginMode}` : '';
     const keyboard = Markup.inlineKeyboard([
       [
-        Markup.button.callback('$25', mode === 'spot' ? `spot_amount_${side.toLowerCase()}_${symbol}_25pct` : `perps_amount_${side.toLowerCase()}_${symbol}_${leverage}x_25pct`),
-        Markup.button.callback('$50', mode === 'spot' ? `spot_amount_${side.toLowerCase()}_${symbol}_50pct` : `perps_amount_${side.toLowerCase()}_${symbol}_${leverage}x_50pct`)
+        Markup.button.callback('$25', mode === 'spot' ? `spot_amount_${side.toLowerCase()}_${symbol}_25pct` : `perps_amount_${side.toLowerCase()}_${symbol}_${leverage}x_${marginMode}_25pct`),
+        Markup.button.callback('$50', mode === 'spot' ? `spot_amount_${side.toLowerCase()}_${symbol}_50pct` : `perps_amount_${side.toLowerCase()}_${symbol}_${leverage}x_${marginMode}_50pct`)
       ],
       [
-        Markup.button.callback('$100', mode === 'spot' ? `spot_amount_${side.toLowerCase()}_${symbol}_75pct` : `perps_amount_${side.toLowerCase()}_${symbol}_${leverage}x_75pct`),
-        Markup.button.callback('$250', mode === 'spot' ? `spot_amount_${side.toLowerCase()}_${symbol}_100pct` : `perps_amount_${side.toLowerCase()}_${symbol}_${leverage}x_100pct`)
+        Markup.button.callback('$100', mode === 'spot' ? `spot_amount_${side.toLowerCase()}_${symbol}_75pct` : `perps_amount_${side.toLowerCase()}_${symbol}_${leverage}x_${marginMode}_75pct`),
+        Markup.button.callback('$250', mode === 'spot' ? `spot_amount_${side.toLowerCase()}_${symbol}_100pct` : `perps_amount_${side.toLowerCase()}_${symbol}_${leverage}x_${marginMode}_100pct`)
       ],
       [
-        Markup.button.callback('🔙 Back', mode === 'spot' ? `spot_${side.toLowerCase()}_${symbol}` : `perps_leverage_${side.toLowerCase()}_${symbol}_${leverage}x`)
+        Markup.button.callback('🔙 Back', mode === 'spot' ? `spot_${side.toLowerCase()}_${symbol}` : `perps_amount_${side.toLowerCase()}_${symbol}_${leverage}x_${marginMode}`)
       ]
     ]);
 
@@ -2717,14 +2765,14 @@ Contact @AsterDEX_Support or visit docs.aster.exchange for detailed guides.
 
     // Set conversation state
     if (ctx.userState) {
-      (ctx.userState as any).expectingManualUSDT = { mode, symbol, side, leverage };
+      (ctx.userState as any).expectingManualUSDT = { mode, symbol, side, leverage, marginMode };
     }
   }
 
   /**
    * Handle manual token input
    */
-  private async handleManualTokenInput(ctx: BotContext, mode: 'spot' | 'perps', symbol: string, side: 'BUY' | 'SELL', leverage?: number): Promise<void> {
+  private async handleManualTokenInput(ctx: BotContext, mode: 'spot' | 'perps', symbol: string, side: 'BUY' | 'SELL', leverage?: number, marginMode?: 'cross' | 'isolated'): Promise<void> {
     const tokenSymbol = symbol.replace('USDT', '');
     const modeText = mode === 'spot' ? 'Spot' : 'Perps';
     const sideText = side === 'BUY' ? (mode === 'spot' ? 'Buy' : 'Long') : (mode === 'spot' ? 'Sell' : 'Short');
@@ -2754,7 +2802,7 @@ Contact @AsterDEX_Support or visit docs.aster.exchange for detailed guides.
         Markup.button.callback('1', '')
       ],
       [
-        Markup.button.callback('🔙 Back', mode === 'spot' ? `spot_${side.toLowerCase()}_${symbol}` : `perps_leverage_${side.toLowerCase()}_${symbol}_${leverage}x`)
+        Markup.button.callback('🔙 Back', mode === 'spot' ? `spot_${side.toLowerCase()}_${symbol}` : `perps_amount_${side.toLowerCase()}_${symbol}_${leverage}x_${marginMode}`)
       ]
     ]);
 
@@ -2762,7 +2810,7 @@ Contact @AsterDEX_Support or visit docs.aster.exchange for detailed guides.
 
     // Set conversation state
     if (ctx.userState) {
-      (ctx.userState as any).expectingManualToken = { mode, symbol, side, leverage };
+      (ctx.userState as any).expectingManualToken = { mode, symbol, side, leverage, marginMode };
     }
   }
 
@@ -2776,7 +2824,7 @@ Contact @AsterDEX_Support or visit docs.aster.exchange for detailed guides.
     // Clear conversation state
     delete (ctx.userState as any).expectingManualUSDT;
 
-    const { mode, symbol, side, leverage } = state;
+    const { mode, symbol, side, leverage, marginMode } = state;
     const amount = parseFloat(text.trim());
 
     if (isNaN(amount) || amount <= 0) {
@@ -2801,7 +2849,7 @@ Contact @AsterDEX_Support or visit docs.aster.exchange for detailed guides.
       if (mode === 'spot') {
         await this.handleSpotTPSLSelection(ctx, symbol, side, amount, 'usdt');
       } else {
-        await this.handlePerpsTPSLSelection(ctx, symbol, side, leverage!, amount, 'usdt');
+        await this.handlePerpsTPSLSelection(ctx, symbol, side, leverage!, marginMode!, amount, 'usdt');
       }
     } catch (error) {
       console.error('Manual USDT execution error:', error);
@@ -2819,7 +2867,7 @@ Contact @AsterDEX_Support or visit docs.aster.exchange for detailed guides.
     // Clear conversation state
     delete (ctx.userState as any).expectingManualToken;
 
-    const { mode, symbol, side, leverage } = state;
+    const { mode, symbol, side, leverage, marginMode } = state;
     const tokenAmount = parseFloat(text.trim());
 
     if (isNaN(tokenAmount) || tokenAmount <= 0) {
@@ -2848,7 +2896,7 @@ Contact @AsterDEX_Support or visit docs.aster.exchange for detailed guides.
       if (mode === 'spot') {
         await this.handleSpotTPSLSelection(ctx, symbol, side, tokenAmount, 'token');
       } else {
-        await this.handlePerpsTPSLSelection(ctx, symbol, side, leverage!, tokenAmount, 'token');
+        await this.handlePerpsTPSLSelection(ctx, symbol, side, leverage!, marginMode!, tokenAmount, 'token');
       }
     } catch (error) {
       console.error('Manual token execution error:', error);
@@ -3213,20 +3261,68 @@ Contact @AsterDEX_Support or visit docs.aster.exchange for detailed guides.
   }
 
   /**
+   * Handle margin mode selection for perps trading
+   */
+  private async handlePerpsMarginModeSelection(ctx: BotContext, symbol: string, side: 'BUY' | 'SELL', leverage: number): Promise<void> {
+    try {
+      const sideEmoji = side === 'BUY' ? '📈' : '📉';
+      
+      const marginText = [
+        `${sideEmoji} **${side} ${symbol.replace('USDT', '')} ${leverage}x**`,
+        '',
+        '⚖️ **Select Margin Mode**',
+        '',
+        'Choose how your position will be margined. This affects your liquidation risk and capital allocation.',
+        '',
+        '**🌐 Cross Margin:**',
+        '• Uses your entire futures account balance as collateral',
+        '• Lower liquidation risk but higher account exposure', 
+        '• All positions share the same margin pool',
+        '• Recommended for experienced traders',
+        '',
+        '**🔒 Isolated Margin:**',
+        '• Uses only allocated margin for this specific position',
+        '• Higher liquidation risk but limited account exposure',
+        '• Position is isolated from other trades',
+        '• Recommended for risk management and testing',
+        '',
+        '**Choose your margin mode:**'
+      ].join('\n');
+
+      const keyboard = Markup.inlineKeyboard([
+        [
+          Markup.button.callback('🌐 Cross Margin', `perps_margin_${side.toLowerCase()}_${symbol}_${leverage}x_cross`),
+          Markup.button.callback('🔒 Isolated Margin', `perps_margin_${side.toLowerCase()}_${symbol}_${leverage}x_isolated`)
+        ],
+        [
+          Markup.button.callback('🔙 Back to Leverage', `perps_${side.toLowerCase()}_${symbol}`)
+        ]
+      ]);
+
+      await ctx.editMessageText(marginText, { parse_mode: 'Markdown', ...keyboard });
+    } catch (error) {
+      console.error('Margin mode selection error:', error);
+      await ctx.reply('❌ Failed to load margin mode options. Please try again.');
+    }
+  }
+
+  /**
    * Handle TP/SL selection for perps trading
    */
-  private async handlePerpsTPSLSelection(ctx: BotContext, symbol: string, side: 'BUY' | 'SELL', leverage: number, amount: number, amountType: string): Promise<void> {
+  private async handlePerpsTPSLSelection(ctx: BotContext, symbol: string, side: 'BUY' | 'SELL', leverage: number, marginMode: 'cross' | 'isolated', amount: number, amountType: string): Promise<void> {
     try {
       const SettingsModule = await import('../settings');
       const settingsManager = new SettingsModule.SettingsManager(this.db, this.encryption);
       const userSettings = await settingsManager.getUserSettings(ctx.userState!.userId);
 
       const sideEmoji = side === 'BUY' ? '📈' : '📉';
+      const marginEmoji = marginMode === 'cross' ? '🌐' : '🔒';
       const amountDisplay = amountType === 'percentage' ? `${amount}%` : 
                            amountType === 'usdt' ? `$${amount}` : `${amount} ${symbol.replace('USDT', '')}`;
 
       const tpslText = [
         `${sideEmoji} **${side} ${symbol.replace('USDT', '')} ${leverage}x**`,
+        `${marginEmoji} **Margin:** ${marginMode.charAt(0).toUpperCase() + marginMode.slice(1)}`,
         `Amount: ${amountDisplay}`,
         '',
         '🎯 **Take Profit & Stop Loss Setup**',
@@ -3244,18 +3340,18 @@ Contact @AsterDEX_Support or visit docs.aster.exchange for detailed guides.
 
       // Create TP preset buttons (first row)
       const tpButtons = userSettings.tp_presets.slice(0, 3).map(tp => 
-        Markup.button.callback(`TP ${tp}%`, `perps_tpsl_${side.toLowerCase()}_${symbol}_${leverage}x_${amount}_${amountType}_tp${tp}_slnone`)
+        Markup.button.callback(`TP ${tp}%`, `perps_tpsl_${side.toLowerCase()}_${symbol}_${leverage}x_${marginMode}_${amount}_${amountType}_tp${tp}_slnone`)
       );
 
       // Create SL preset buttons (second row)
       const slButtons = userSettings.sl_presets.slice(0, 3).map(sl => 
-        Markup.button.callback(`SL ${sl}%`, `perps_tpsl_${side.toLowerCase()}_${symbol}_${leverage}x_${amount}_${amountType}_tpnone_sl${sl}`)
+        Markup.button.callback(`SL ${sl}%`, `perps_tpsl_${side.toLowerCase()}_${symbol}_${leverage}x_${marginMode}_${amount}_${amountType}_tpnone_sl${sl}`)
       );
 
       // Create combined TP/SL buttons (third row)
       const combinedButtons = userSettings.tp_presets.slice(0, 2).map((tp, index) => {
         const sl = userSettings.sl_presets[Math.min(index, userSettings.sl_presets.length - 1)];
-        return Markup.button.callback(`TP ${tp}% / SL ${sl}%`, `perps_tpsl_${side.toLowerCase()}_${symbol}_${leverage}x_${amount}_${amountType}_tp${tp}_sl${sl}`);
+        return Markup.button.callback(`TP ${tp}% / SL ${sl}%`, `perps_tpsl_${side.toLowerCase()}_${symbol}_${leverage}x_${marginMode}_${amount}_${amountType}_tp${tp}_sl${sl}`);
       });
 
       const keyboard = Markup.inlineKeyboard([
@@ -3263,11 +3359,11 @@ Contact @AsterDEX_Support or visit docs.aster.exchange for detailed guides.
         slButtons,
         combinedButtons,
         [
-          Markup.button.callback('🚀 Execute Without TP/SL', `perps_tpsl_${side.toLowerCase()}_${symbol}_${leverage}x_${amount}_${amountType}_tpnone_slnone`),
-          Markup.button.callback('⚙️ Custom TP/SL', `perps_custom_tpsl_${side.toLowerCase()}_${symbol}_${leverage}x_${amount}_${amountType}`)
+          Markup.button.callback('🚀 Execute Without TP/SL', `perps_tpsl_${side.toLowerCase()}_${symbol}_${leverage}x_${marginMode}_${amount}_${amountType}_tpnone_slnone`),
+          Markup.button.callback('⚙️ Custom TP/SL', `perps_custom_tpsl_${side.toLowerCase()}_${symbol}_${leverage}x_${marginMode}_${amount}_${amountType}`)
         ],
         [
-          Markup.button.callback('🔙 Back to Amount', `perps_leverage_${side.toLowerCase()}_${symbol}_${leverage}x`)
+          Markup.button.callback('🔙 Back to Amount', `perps_amount_${side.toLowerCase()}_${symbol}_${leverage}x_${marginMode}`)
         ]
       ]);
 
@@ -3332,7 +3428,7 @@ Contact @AsterDEX_Support or visit docs.aster.exchange for detailed guides.
   /**
    * Handle perps TP/SL execution with risk management
    */
-  private async handlePerpsTPSLExecute(ctx: BotContext, symbol: string, side: 'BUY' | 'SELL', leverage: number, amount: number, amountType: string, tpValue: number | null, slValue: number | null): Promise<void> {
+  private async handlePerpsTPSLExecute(ctx: BotContext, symbol: string, side: 'BUY' | 'SELL', leverage: number, marginMode: 'cross' | 'isolated', amount: number, amountType: string, tpValue: number | null, slValue: number | null): Promise<void> {
     try {
       let finalAmount = amount;
       
@@ -3492,6 +3588,316 @@ Contact @AsterDEX_Support or visit docs.aster.exchange for detailed guides.
     } catch (error) {
       console.error('Spot TP order error:', error);
     }
+  }
+
+  /**
+   * Handle account transfer menu
+   */
+  private async handleTransferMenu(ctx: BotContext): Promise<void> {
+    if (!ctx.userState?.isLinked) {
+      await ctx.reply('❌ Please link your API credentials first using /link');
+      return;
+    }
+
+    try {
+      const apiClient = await this.apiClientService.getOrCreateClient(ctx.userState.userId);
+      
+      // Get balances from both accounts
+      const [spotService, futuresService] = await Promise.all([
+        import('../services/SpotAccountService').then(module => new module.SpotAccountService(apiClient)),
+        import('../services/FuturesAccountService').then(module => new module.FuturesAccountService(apiClient))
+      ]);
+
+      const [spotBalance, futuresAccount] = await Promise.all([
+        spotService.getUsdtBalance(),
+        futuresService.getFuturesAccount()
+      ]);
+
+      const futuresBalance = parseFloat(futuresAccount.assets.find(a => a.asset === 'USDT')?.availableBalance || '0');
+
+      const transferText = [
+        '💸 **Account Transfer Center**',
+        '',
+        'Transfer USDT between your Spot and Futures trading accounts instantly. Manage your capital allocation across different trading strategies.',
+        '',
+        '**📊 Current Balances:**',
+        `🏪 **Spot Account:** $${spotBalance.toFixed(2)} USDT`,
+        `⚡ **Futures Account:** $${futuresBalance.toFixed(2)} USDT`,
+        '',
+        '**💱 Transfer Options:**',
+        '• Quick percentage transfers (25%, 50%, 75%, 100%)',
+        '• Custom amount input for precise allocation',
+        '• Instant execution with real-time balance updates',
+        '',
+        '**Choose transfer direction:**'
+      ].join('\n');
+
+      const keyboard = Markup.inlineKeyboard([
+        [
+          Markup.button.callback(`🏪➡️⚡ Spot to Futures ($${spotBalance.toFixed(2)})`, 'transfer_spot_to_futures'),
+          Markup.button.callback(`⚡➡️🏪 Futures to Spot ($${futuresBalance.toFixed(2)})`, 'transfer_futures_to_spot')
+        ],
+        [
+          Markup.button.callback('🔄 Refresh Balances', 'transfer_menu'),
+          Markup.button.callback('📊 Transfer History', 'transfer_history')
+        ],
+        [
+          Markup.button.callback('🔙 Back to Main Menu', 'main_menu')
+        ]
+      ]);
+
+      await ctx.editMessageText(transferText, { parse_mode: 'Markdown', ...keyboard });
+    } catch (error) {
+      console.error('Transfer menu error:', error);
+      await ctx.reply('❌ Failed to load transfer menu. Please try again.');
+    }
+  }
+
+  /**
+   * Handle transfer amount selection
+   */
+  private async handleTransferAmountSelection(ctx: BotContext, direction: 'spot_to_futures' | 'futures_to_spot'): Promise<void> {
+    try {
+      const apiClient = await this.apiClientService.getOrCreateClient(ctx.userState!.userId);
+      
+      let availableBalance = 0;
+      let fromAccount = '';
+      let toAccount = '';
+      let emoji = '';
+
+      if (direction === 'spot_to_futures') {
+        const SpotAccountService = await import('../services/SpotAccountService');
+        const spotService = new SpotAccountService.SpotAccountService(apiClient);
+        availableBalance = await spotService.getUsdtBalance();
+        fromAccount = 'Spot';
+        toAccount = 'Futures';
+        emoji = '🏪➡️⚡';
+      } else {
+        const FuturesAccountService = await import('../services/FuturesAccountService');
+        const futuresService = new FuturesAccountService.FuturesAccountService(apiClient);
+        const account = await futuresService.getFuturesAccount();
+        availableBalance = parseFloat(account.assets.find(a => a.asset === 'USDT')?.availableBalance || '0');
+        fromAccount = 'Futures';
+        toAccount = 'Spot';
+        emoji = '⚡➡️🏪';
+      }
+
+      const transferText = [
+        `${emoji} **Transfer ${fromAccount} → ${toAccount}**`,
+        '',
+        `💰 **Available Balance:** $${availableBalance.toFixed(2)} USDT`,
+        '',
+        '💸 **Select Transfer Amount**',
+        '',
+        '**📊 Quick Percentage Options:**',
+        'Choose how much of your available balance to transfer:'
+      ].join('\n');
+
+      if (availableBalance < 1) {
+        await ctx.editMessageText(
+          `${emoji} **Transfer ${fromAccount} → ${toAccount}**\n\n❌ Insufficient balance in ${fromAccount} account.\n\nAvailable: $${availableBalance.toFixed(2)} USDT\n\nYou need at least $1 USDT to transfer.`,
+          { 
+            parse_mode: 'Markdown',
+            ...Markup.inlineKeyboard([
+              [Markup.button.callback('🔙 Back to Transfer Menu', 'transfer_menu')]
+            ])
+          }
+        );
+        return;
+      }
+
+      const keyboard = Markup.inlineKeyboard([
+        [
+          Markup.button.callback(`25% ($${(availableBalance * 0.25).toFixed(2)})`, `transfer_amount_${direction}_25pct`),
+          Markup.button.callback(`50% ($${(availableBalance * 0.50).toFixed(2)})`, `transfer_amount_${direction}_50pct`)
+        ],
+        [
+          Markup.button.callback(`75% ($${(availableBalance * 0.75).toFixed(2)})`, `transfer_amount_${direction}_75pct`),
+          Markup.button.callback(`100% ($${availableBalance.toFixed(2)})`, `transfer_amount_${direction}_100pct`)
+        ],
+        [
+          Markup.button.callback('💰 Enter Custom Amount', `transfer_manual_${direction}`)
+        ],
+        [
+          Markup.button.callback('🔙 Back to Transfer Menu', 'transfer_menu')
+        ]
+      ]);
+
+      await ctx.editMessageText(transferText, { parse_mode: 'Markdown', ...keyboard });
+    } catch (error) {
+      console.error('Transfer amount selection error:', error);
+      await ctx.reply('❌ Failed to load transfer options. Please try again.');
+    }
+  }
+
+  /**
+   * Execute account transfer
+   */
+  private async handleTransferExecute(ctx: BotContext, direction: 'spot_to_futures' | 'futures_to_spot', amount: number, amountType: 'percentage' | 'usdt'): Promise<void> {
+    try {
+      const apiClient = await this.apiClientService.getOrCreateClient(ctx.userState!.userId);
+      
+      let finalAmount = amount;
+      let fromAccount = '';
+      let toAccount = '';
+      let emoji = '';
+
+      // Calculate final amount if percentage
+      if (amountType === 'percentage') {
+        if (direction === 'spot_to_futures') {
+          const SpotAccountService = await import('../services/SpotAccountService');
+          const spotService = new SpotAccountService.SpotAccountService(apiClient);
+          const availableBalance = await spotService.getUsdtBalance();
+          finalAmount = Math.floor(availableBalance * (amount / 100) * 100) / 100; // Round to 2 decimals
+          fromAccount = 'Spot';
+          toAccount = 'Futures';
+          emoji = '🏪➡️⚡';
+        } else {
+          const FuturesAccountService = await import('../services/FuturesAccountService');
+          const futuresService = new FuturesAccountService.FuturesAccountService(apiClient);
+          const account = await futuresService.getFuturesAccount();
+          const availableBalance = parseFloat(account.assets.find(a => a.asset === 'USDT')?.availableBalance || '0');
+          finalAmount = Math.floor(availableBalance * (amount / 100) * 100) / 100; // Round to 2 decimals
+          fromAccount = 'Futures';
+          toAccount = 'Spot';
+          emoji = '⚡➡️🏪';
+        }
+      } else {
+        fromAccount = direction === 'spot_to_futures' ? 'Spot' : 'Futures';
+        toAccount = direction === 'spot_to_futures' ? 'Futures' : 'Spot';
+        emoji = direction === 'spot_to_futures' ? '🏪➡️⚡' : '⚡➡️🏪';
+      }
+
+      if (finalAmount < 1) {
+        await ctx.reply(`❌ **Transfer Amount Too Small**\n\nMinimum transfer amount is $1 USDT.\nCalculated amount: $${finalAmount.toFixed(2)}`);
+        return;
+      }
+
+      // Execute the transfer
+      const transferType = direction === 'spot_to_futures' ? 'MAIN_UMFUTURE' : 'UMFUTURE_MAIN';
+      
+      const result = await apiClient.transfer({
+        type: transferType,
+        asset: 'USDT',
+        amount: finalAmount.toString()
+      });
+
+      const confirmText = [
+        `✅ **Transfer Successful**`,
+        '',
+        `${emoji} **${fromAccount} → ${toAccount}**`,
+        `💰 **Amount:** $${finalAmount.toFixed(2)} USDT`,
+        `🆔 **Transfer ID:** ${result.tranId || 'N/A'}`,
+        '',
+        '🔄 **Balance Updated**',
+        'Your account balances have been updated immediately.',
+        '',
+        '📊 Use /balance to view updated balances or check the transfer menu for current allocation.'
+      ].join('\n');
+
+      const keyboard = Markup.inlineKeyboard([
+        [
+          Markup.button.callback('🔄 Transfer More', 'transfer_menu'),
+          Markup.button.callback('📊 Check Balance', 'balance')
+        ],
+        [
+          Markup.button.callback('🔙 Back to Main Menu', 'main_menu')
+        ]
+      ]);
+
+      await ctx.editMessageText(confirmText, { parse_mode: 'Markdown', ...keyboard });
+
+    } catch (error) {
+      console.error('Transfer execution error:', error);
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+      await ctx.reply(`❌ **Transfer Failed**\n\n${errorMessage}\n\nPlease check your balance and try again.`);
+    }
+  }
+
+  /**
+   * Handle manual transfer amount input
+   */
+  private async handleTransferManualInput(ctx: BotContext, direction: 'spot_to_futures' | 'futures_to_spot'): Promise<void> {
+    const fromAccount = direction === 'spot_to_futures' ? 'Spot' : 'Futures';
+    const toAccount = direction === 'spot_to_futures' ? 'Futures' : 'Spot';
+    const emoji = direction === 'spot_to_futures' ? '🏪➡️⚡' : '⚡➡️🏪';
+
+    // Set up conversation state for manual input
+    if (!ctx.userState) ctx.userState = { userId: 0, telegramId: 0, isLinked: false };
+    ctx.userState.awaitingInput = 'transfer_amount';
+    ctx.userState.inputContext = { direction };
+
+    await ctx.editMessageText(
+      `${emoji} **Transfer ${fromAccount} → ${toAccount}**\n\n` +
+      `💰 **Enter Transfer Amount**\n\n` +
+      `Please type the amount in USDT you want to transfer.\n\n` +
+      `**Examples:**\n` +
+      `• 100 (for $100 USDT)\n` +
+      `• 50.5 (for $50.50 USDT)\n\n` +
+      `**Minimum:** $1 USDT`,
+      { 
+        parse_mode: 'Markdown',
+        ...Markup.inlineKeyboard([
+          [Markup.button.callback('🔙 Cancel', 'transfer_menu')]
+        ])
+      }
+    );
+  }
+
+  /**
+   * Handle transfer amount text input
+   */
+  private async handleTransferAmountText(ctx: BotContext, text: string): Promise<void> {
+    if (!ctx.userState?.inputContext?.direction) {
+      await ctx.reply('❌ Transfer context lost. Please start again from the transfer menu.');
+      return;
+    }
+
+    const direction = ctx.userState.inputContext.direction as 'spot_to_futures' | 'futures_to_spot';
+    
+    // Clear the input state
+    ctx.userState.awaitingInput = undefined;
+    ctx.userState.inputContext = undefined;
+
+    // Parse the amount
+    const amount = parseFloat(text.replace(/[^0-9.]/g, ''));
+
+    if (isNaN(amount) || amount <= 0) {
+      await ctx.reply(
+        '❌ **Invalid Amount**\n\n' +
+        'Please enter a valid number greater than 0.\n\n' +
+        '**Examples:**\n' +
+        '• 100\n' +
+        '• 50.5\n' +
+        '• 25\n\n' +
+        '🔄 Use /transfer to try again.',
+        { parse_mode: 'Markdown' }
+      );
+      return;
+    }
+
+    if (amount < 1) {
+      await ctx.reply(
+        '❌ **Amount Too Small**\n\n' +
+        'Minimum transfer amount is $1 USDT.\n\n' +
+        '🔄 Use /transfer to try again.',
+        { parse_mode: 'Markdown' }
+      );
+      return;
+    }
+
+    if (amount > 100000) {
+      await ctx.reply(
+        '❌ **Amount Too Large**\n\n' +
+        'Maximum transfer amount is $100,000 USDT per transaction.\n\n' +
+        'Please enter a smaller amount or contact support for larger transfers.',
+        { parse_mode: 'Markdown' }
+      );
+      return;
+    }
+
+    // Execute the transfer
+    await this.handleTransferExecute(ctx, direction, amount, 'usdt');
   }
 
   /**
