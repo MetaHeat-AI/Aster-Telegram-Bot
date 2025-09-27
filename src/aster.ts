@@ -374,11 +374,33 @@ export class AsterApiClient {
     priceChangePercent: string;
   }>> {
     try {
-      const response = await this.axios.get('/fapi/v1/ticker/24hr');
+      const response = await this.axios.get('/fapi/v1/ticker/24hr', {
+        timeout: 10000, // 10 second timeout
+        validateStatus: (status) => status < 500 // Accept any status less than 500
+      });
+      
+      if (!response.data || !Array.isArray(response.data)) {
+        throw new Error('Invalid response format from futures ticker API');
+      }
+      
+      if (response.data.length === 0) {
+        throw new Error('No ticker data returned from API');
+      }
+      
       return response.data;
     } catch (error) {
       console.error('[FUTURES API] Failed to get all tickers:', error);
-      return [];
+      
+      if (error instanceof Error) {
+        if (error.message.includes('timeout')) {
+          throw new Error('API request timed out - please try again');
+        }
+        if (error.message.includes('Network Error')) {
+          throw new Error('Network connectivity issue - please check your connection');
+        }
+        throw new Error(`Futures ticker API failed: ${error.message}`);
+      }
+      throw new Error('Futures ticker API failed with unknown error');
     }
   }
 

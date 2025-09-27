@@ -2180,11 +2180,21 @@ Contact @AsterDEX\\_Support or visit docs.aster.exchange for detailed guides.
     try {
       const allTickers = await this.publicApiClient.getAllFuturesTickers();
       
+      // Check if we actually got data
+      if (!allTickers || allTickers.length === 0) {
+        throw new Error('No ticker data received from API');
+      }
+      
       // Sort by volume and take top 10
       const topByVolume = allTickers
         .filter((ticker: any) => ticker.symbol.endsWith('USDT'))
         .sort((a: any, b: any) => parseFloat(b.volume) - parseFloat(a.volume))
         .slice(0, 10);
+        
+      // Check if we have any USDT pairs
+      if (topByVolume.length === 0) {
+        throw new Error('No USDT trading pairs found in ticker data');
+      }
       
       let volumeText = '📈 **Highest Volume Trading Pairs (24h)**\n\n';
       
@@ -2223,7 +2233,26 @@ Contact @AsterDEX\\_Support or visit docs.aster.exchange for detailed guides.
       await ctx.editMessageText(volumeText, { parse_mode: 'Markdown', ...keyboard });
     } catch (error) {
       console.error('Top volume error:', error);
-      await ctx.reply('❌ Failed to load top volume data. Please try again.');
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+      
+      // Provide a more informative error message with a retry option
+      const retryKeyboard = Markup.inlineKeyboard([
+        [
+          Markup.button.callback('🔄 Retry', 'price_top_volume'),
+          Markup.button.callback('🔙 Back to Price Menu', 'price_menu')
+        ]
+      ]);
+      
+      await ctx.editMessageText(
+        `❌ **Failed to Load Top Volume Data**\n\n` +
+        `Error: ${errorMessage}\n\n` +
+        `This might be due to:\n` +
+        `• API connectivity issues\n` +
+        `• Exchange server maintenance\n` +
+        `• Temporary network problems\n\n` +
+        `Please try again in a moment.`,
+        { parse_mode: 'Markdown', ...retryKeyboard }
+      );
     }
   }
 
