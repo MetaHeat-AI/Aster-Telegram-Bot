@@ -1346,12 +1346,14 @@ Contact @AsterDEX\\_Support or visit docs.aster.exchange for detailed guides.
       await testClient.getAccount();
 
       // Save credentials to database
-      const userService = await this.userService.getUserOrCreate(ctx.from!.id);
-      await this.credentialsService.saveCredentials(userService.id, apiKey, trimmedSecret);
+      const user = await this.db.getUserOrCreate(ctx.from!.id);
+      const encryptedKey = this.encryption.encrypt(apiKey);
+      const encryptedSecret = this.encryption.encrypt(trimmedSecret);
+      await this.db.storeApiCredentials(user.id, encryptedKey, encryptedSecret);
 
       // Update user state
       ctx.userState!.isLinked = true;
-      ctx.userState!.userId = userService.id;
+      ctx.userState!.userId = user.id;
       ctx.userState!.conversationState = undefined;
 
       // Success message
@@ -1451,7 +1453,7 @@ Contact @AsterDEX\\_Support or visit docs.aster.exchange for detailed guides.
       });
 
       // Remove credentials from database
-      await this.credentialsService.deleteCredentials(ctx.userState.userId);
+      await this.db.removeApiCredentials(ctx.userState.userId);
 
       // Update user state
       ctx.userState.isLinked = false;
