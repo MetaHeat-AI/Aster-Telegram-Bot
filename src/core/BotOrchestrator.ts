@@ -462,6 +462,41 @@ export class BotOrchestrator {
       this.handleRefreshPosition(ctx, symbol);
     });
 
+    // TP/SL action handlers
+    this.bot.action(/^sl_set_([A-Z0-9]+USDT)_([0-9.]+)_(\d+)$/, (ctx) => {
+      const symbol = ctx.match[1];
+      const price = parseFloat(ctx.match[2]);
+      const riskPercent = parseInt(ctx.match[3]);
+      this.handleExecuteStopLoss(ctx, symbol, price, riskPercent);
+    });
+
+    this.bot.action(/^tp_set_([A-Z0-9]+USDT)_([0-9.]+)_(\d+)$/, (ctx) => {
+      const symbol = ctx.match[1];
+      const price = parseFloat(ctx.match[2]);
+      const profitPercent = parseInt(ctx.match[3]);
+      this.handleExecuteTakeProfit(ctx, symbol, price, profitPercent);
+    });
+
+    this.bot.action(/^sl_custom_([A-Z0-9]+USDT)$/, (ctx) => {
+      const symbol = ctx.match[1];
+      this.handleCustomStopLoss(ctx, symbol);
+    });
+
+    this.bot.action(/^tp_custom_([A-Z0-9]+USDT)$/, (ctx) => {
+      const symbol = ctx.match[1];
+      this.handleCustomTakeProfit(ctx, symbol);
+    });
+
+    this.bot.action(/^sl_market_([A-Z0-9]+USDT)$/, (ctx) => {
+      const symbol = ctx.match[1];
+      this.handleMarketStopLoss(ctx, symbol);
+    });
+
+    this.bot.action(/^tp_market_([A-Z0-9]+USDT)$/, (ctx) => {
+      const symbol = ctx.match[1];
+      this.handleMarketTakeProfit(ctx, symbol);
+    });
+
     // Spot sell percentage handlers
     this.bot.action(/^spot_sell_(\d+)_(.+)$/, (ctx) => {
       const percentage = parseInt(ctx.match[1]);
@@ -699,6 +734,13 @@ export class BotOrchestrator {
         return;
       }
 
+      // Check if expecting custom TP/SL price input
+      if (ctx.userState?.conversationState?.step === 'waiting_custom_pair' && 
+          ctx.userState?.conversationState?.data?.action) {
+        this.handleCustomTPSLPriceText(ctx, ctx.message.text);
+        return;
+      }
+
       // Check if expecting transfer amount input
       if (ctx.userState?.awaitingInput === 'transfer_amount') {
         this.handleTransferAmountText(ctx, ctx.message.text);
@@ -750,8 +792,7 @@ export class BotOrchestrator {
       // Check current webhook before setting new one
       try {
         const currentWebhook = await this.bot.telegram.getWebhookInfo();
-        const needsUpdate = currentWebhook.url !== this.config.webhook.url || 
-                           !currentWebhook.secret_token;
+        const needsUpdate = currentWebhook.url !== this.config.webhook.url;
         
         if (needsUpdate) {
           console.log(`[Bot] 🔄 Updating webhook from '${currentWebhook.url}' to '${this.config.webhook.url}'`);
@@ -1437,10 +1478,10 @@ Contact @AsterDEX\\_Support or visit docs.aster.exchange for detailed guides.
           await this.handleClosePosition(ctx, symbol, apiClient, 75);
           break;
         case 'set_sl':
-          await this.handlePlaceholderAction(ctx, `🛡️ Set Stop Loss for ${symbol} - Feature coming soon!`);
+          await this.handleSetStopLoss(ctx, symbol);
           break;
         case 'set_tp':
-          await this.handlePlaceholderAction(ctx, `🎯 Set Take Profit for ${symbol} - Feature coming soon!`);
+          await this.handleSetTakeProfit(ctx, symbol);
           break;
         case 'add_margin':
           await this.handlePlaceholderAction(ctx, `➕ Add Margin for ${symbol} - Feature coming soon!`);
@@ -1766,6 +1807,408 @@ Contact @AsterDEX\\_Support or visit docs.aster.exchange for detailed guides.
     } catch (error: any) {
       console.error('Close position error:', error);
       await ctx.reply(`❌ **Position Closure Failed**\n\n**Symbol:** ${symbol}\n**Error:** ${error.message || 'Unknown error'}\n\n🔄 Please try again.`);
+    }
+  }
+
+  /**
+   * Handle setting stop loss for a position
+   */
+  private async handleSetStopLoss(ctx: BotContext, symbol: string): Promise<void> {
+    try {
+      await ctx.answerCbQuery('🛡️ Setting up Stop Loss...');
+      
+      const apiClient = await this.apiClientService.getOrCreateClient(ctx.userState!.userId);
+      
+      // Get current position
+      const positions = await apiClient.getPositionRisk();
+      const position = positions.find((p: any) => p.symbol === symbol && parseFloat(p.positionAmt) !== 0);
+      
+      if (!position) {
+        await ctx.reply(`❌ **No Open Position**\n\n**Symbol:** ${symbol}\n\nYou don't have an open position for this symbol.`);
+        return;
+      }
+      
+      const positionSize = parseFloat(position.positionAmt);
+      const entryPrice = parseFloat(position.entryPrice);
+      const isLong = positionSize > 0;
+      
+      // Calculate suggested stop loss levels (risk percentages)
+      const risk5Pct = isLong ? entryPrice * 0.95 : entryPrice * 1.05;
+      const risk10Pct = isLong ? entryPrice * 0.90 : entryPrice * 1.10;
+      const risk15Pct = isLong ? entryPrice * 0.85 : entryPrice * 1.15;
+      const risk20Pct = isLong ? entryPrice * 0.80 : entryPrice * 1.20;
+      
+      const stopLossText = [
+        `🛡️ **Set Stop Loss for ${symbol}**`,
+        `📍 **Position:** ${isLong ? 'LONG' : 'SHORT'} ${Math.abs(positionSize)} ${symbol.replace('USDT', '')}`,
+        `💰 **Entry Price:** $${entryPrice.toFixed(6)}`,
+        `📊 **Current Price:** $${entryPrice.toFixed(6)}`,
+        `${isLong ? '📉' : '📈'} **Unrealized PnL:** ${parseFloat(position.unrealizedPnl).toFixed(2)} USDT`,
+        '',
+        '🎯 **Choose Stop Loss Level:**'
+      ].join('\n');
+      
+      const keyboard = Markup.inlineKeyboard([
+        [
+          Markup.button.callback(`5% Risk ($${risk5Pct.toFixed(6)})`, `sl_set_${symbol}_${risk5Pct.toFixed(6)}_5`),
+          Markup.button.callback(`10% Risk ($${risk10Pct.toFixed(6)})`, `sl_set_${symbol}_${risk10Pct.toFixed(6)}_10`)
+        ],
+        [
+          Markup.button.callback(`15% Risk ($${risk15Pct.toFixed(6)})`, `sl_set_${symbol}_${risk15Pct.toFixed(6)}_15`),
+          Markup.button.callback(`20% Risk ($${risk20Pct.toFixed(6)})`, `sl_set_${symbol}_${risk20Pct.toFixed(6)}_20`)
+        ],
+        [
+          Markup.button.callback('📝 Custom Price', `sl_custom_${symbol}`),
+          Markup.button.callback('📊 Market Price', `sl_market_${symbol}`)
+        ],
+        [
+          Markup.button.callback('🔙 Back to Position', `position_${symbol}`)
+        ]
+      ]);
+      
+      await this.safeEditMessageText(ctx, stopLossText, { parse_mode: 'Markdown', ...keyboard });
+      
+    } catch (error: any) {
+      console.error('Set stop loss error:', error);
+      await ctx.reply(`❌ **Stop Loss Setup Failed**\n\n**Symbol:** ${symbol}\n**Error:** ${error.message || 'Unknown error'}\n\n🔄 Please try again.`);
+    }
+  }
+
+  /**
+   * Handle setting take profit for a position
+   */
+  private async handleSetTakeProfit(ctx: BotContext, symbol: string): Promise<void> {
+    try {
+      await ctx.answerCbQuery('🎯 Setting up Take Profit...');
+      
+      const apiClient = await this.apiClientService.getOrCreateClient(ctx.userState!.userId);
+      
+      // Get current position
+      const positions = await apiClient.getPositionRisk();
+      const position = positions.find((p: any) => p.symbol === symbol && parseFloat(p.positionAmt) !== 0);
+      
+      if (!position) {
+        await ctx.reply(`❌ **No Open Position**\n\n**Symbol:** ${symbol}\n\nYou don't have an open position for this symbol.`);
+        return;
+      }
+      
+      const positionSize = parseFloat(position.positionAmt);
+      const entryPrice = parseFloat(position.entryPrice);
+      const isLong = positionSize > 0;
+      
+      // Calculate suggested take profit levels (profit percentages)
+      const profit10Pct = isLong ? entryPrice * 1.10 : entryPrice * 0.90;
+      const profit25Pct = isLong ? entryPrice * 1.25 : entryPrice * 0.75;
+      const profit50Pct = isLong ? entryPrice * 1.50 : entryPrice * 0.50;
+      const profit100Pct = isLong ? entryPrice * 2.00 : entryPrice * 0.50;
+      
+      const takeProfitText = [
+        `🎯 **Set Take Profit for ${symbol}**`,
+        `📍 **Position:** ${isLong ? 'LONG' : 'SHORT'} ${Math.abs(positionSize)} ${symbol.replace('USDT', '')}`,
+        `💰 **Entry Price:** $${entryPrice.toFixed(6)}`,
+        `📊 **Current Price:** $${entryPrice.toFixed(6)}`,
+        `${isLong ? '📈' : '📉'} **Unrealized PnL:** ${parseFloat(position.unrealizedPnl).toFixed(2)} USDT`,
+        '',
+        '💰 **Choose Take Profit Level:**'
+      ].join('\n');
+      
+      const keyboard = Markup.inlineKeyboard([
+        [
+          Markup.button.callback(`10% Profit ($${profit10Pct.toFixed(6)})`, `tp_set_${symbol}_${profit10Pct.toFixed(6)}_10`),
+          Markup.button.callback(`25% Profit ($${profit25Pct.toFixed(6)})`, `tp_set_${symbol}_${profit25Pct.toFixed(6)}_25`)
+        ],
+        [
+          Markup.button.callback(`50% Profit ($${profit50Pct.toFixed(6)})`, `tp_set_${symbol}_${profit50Pct.toFixed(6)}_50`),
+          Markup.button.callback(`100% Profit ($${profit100Pct.toFixed(6)})`, `tp_set_${symbol}_${profit100Pct.toFixed(6)}_100`)
+        ],
+        [
+          Markup.button.callback('📝 Custom Price', `tp_custom_${symbol}`),
+          Markup.button.callback('📊 Market Price', `tp_market_${symbol}`)
+        ],
+        [
+          Markup.button.callback('🔙 Back to Position', `position_${symbol}`)
+        ]
+      ]);
+      
+      await this.safeEditMessageText(ctx, takeProfitText, { parse_mode: 'Markdown', ...keyboard });
+      
+    } catch (error: any) {
+      console.error('Set take profit error:', error);
+      await ctx.reply(`❌ **Take Profit Setup Failed**\n\n**Symbol:** ${symbol}\n**Error:** ${error.message || 'Unknown error'}\n\n🔄 Please try again.`);
+    }
+  }
+
+  /**
+   * Execute stop loss order
+   */
+  private async handleExecuteStopLoss(ctx: BotContext, symbol: string, stopPrice: number, riskPercent: number): Promise<void> {
+    try {
+      await ctx.answerCbQuery(`🛡️ Setting ${riskPercent}% risk stop loss...`);
+      
+      const apiClient = await this.apiClientService.getOrCreateClient(ctx.userState!.userId);
+      
+      // Execute the stop loss order
+      const result = await apiClient.setStopLoss(symbol, stopPrice);
+      
+      const successText = [
+        `✅ **Stop Loss Set Successfully**`,
+        '',
+        `🛡️ **Symbol:** ${symbol}`,
+        `💰 **Stop Price:** $${stopPrice.toFixed(6)}`,
+        `📊 **Risk Level:** ${riskPercent}%`,
+        `🆔 **Order ID:** ${result.orderId}`,
+        '',
+        '⚠️ *Your position is now protected with a stop loss order.*'
+      ].join('\n');
+      
+      const keyboard = Markup.inlineKeyboard([
+        [
+          Markup.button.callback('📊 View Position', `position_${symbol}`),
+          Markup.button.callback('🎯 Set Take Profit', `position_set_tp_${symbol}`)
+        ],
+        [
+          Markup.button.callback('🔙 Back to Positions', 'positions_menu')
+        ]
+      ]);
+      
+      await this.safeEditMessageText(ctx, successText, { parse_mode: 'Markdown', ...keyboard });
+      
+      // Emit event
+      this.eventEmitter.emitEvent({
+        type: EventTypes.TRADE_EXECUTED,
+        timestamp: new Date(),
+        userId: ctx.userState!.userId,
+        telegramId: ctx.userState!.telegramId,
+        correlationId: ctx.correlationId,
+        symbol,
+        action: 'STOP_LOSS',
+        price: stopPrice.toString(),
+        orderId: result.orderId
+      });
+      
+    } catch (error: any) {
+      console.error('Execute stop loss error:', error);
+      await ctx.reply(`❌ **Stop Loss Failed**\n\n**Symbol:** ${symbol}\n**Error:** ${error.message || 'Unknown error'}\n\n🔄 Please try again.`);
+    }
+  }
+
+  /**
+   * Execute take profit order
+   */
+  private async handleExecuteTakeProfit(ctx: BotContext, symbol: string, targetPrice: number, profitPercent: number): Promise<void> {
+    try {
+      await ctx.answerCbQuery(`🎯 Setting ${profitPercent}% profit target...`);
+      
+      const apiClient = await this.apiClientService.getOrCreateClient(ctx.userState!.userId);
+      
+      // Execute the take profit order
+      const result = await apiClient.setTakeProfit(symbol, targetPrice);
+      
+      const successText = [
+        `✅ **Take Profit Set Successfully**`,
+        '',
+        `🎯 **Symbol:** ${symbol}`,
+        `💰 **Target Price:** $${targetPrice.toFixed(6)}`,
+        `📊 **Profit Target:** ${profitPercent}%`,
+        `🆔 **Order ID:** ${result.orderId}`,
+        '',
+        '💰 *Your position will close automatically when target is reached.*'
+      ].join('\n');
+      
+      const keyboard = Markup.inlineKeyboard([
+        [
+          Markup.button.callback('📊 View Position', `position_${symbol}`),
+          Markup.button.callback('🛡️ Set Stop Loss', `position_set_sl_${symbol}`)
+        ],
+        [
+          Markup.button.callback('🔙 Back to Positions', 'positions_menu')
+        ]
+      ]);
+      
+      await this.safeEditMessageText(ctx, successText, { parse_mode: 'Markdown', ...keyboard });
+      
+      // Emit event
+      this.eventEmitter.emitEvent({
+        type: EventTypes.TRADE_EXECUTED,
+        timestamp: new Date(),
+        userId: ctx.userState!.userId,
+        telegramId: ctx.userState!.telegramId,
+        correlationId: ctx.correlationId,
+        symbol,
+        action: 'TAKE_PROFIT',
+        price: targetPrice.toString(),
+        orderId: result.orderId
+      });
+      
+    } catch (error: any) {
+      console.error('Execute take profit error:', error);
+      await ctx.reply(`❌ **Take Profit Failed**\n\n**Symbol:** ${symbol}\n**Error:** ${error.message || 'Unknown error'}\n\n🔄 Please try again.`);
+    }
+  }
+
+  /**
+   * Handle custom stop loss price input
+   */
+  private async handleCustomStopLoss(ctx: BotContext, symbol: string): Promise<void> {
+    try {
+      await ctx.answerCbQuery('📝 Enter custom stop loss price...');
+      
+      const customText = [
+        `📝 **Custom Stop Loss for ${symbol}**`,
+        '',
+        '🛡️ **Enter your stop loss price:**',
+        '',
+        '⚠️ *Please enter the exact price where you want the stop loss to trigger.*',
+        '',
+        '💡 **Tips:**',
+        '• For LONG positions: Enter price BELOW current price',
+        '• For SHORT positions: Enter price ABOVE current price',
+        '• Use decimal format (e.g. 42.1234)'
+      ].join('\n');
+      
+      const keyboard = Markup.inlineKeyboard([
+        [
+          Markup.button.callback('🔙 Back to Stop Loss', `position_set_sl_${symbol}`)
+        ]
+      ]);
+      
+      await this.safeEditMessageText(ctx, customText, { parse_mode: 'Markdown', ...keyboard });
+      
+      // Set user state to expect SL price input
+      if (ctx.userState) {
+        ctx.userState.conversationState = {
+          step: 'waiting_custom_pair',
+          data: { symbol, action: 'stop_loss' }
+        };
+      }
+      
+    } catch (error: any) {
+      console.error('Custom stop loss error:', error);
+      await ctx.reply(`❌ **Setup Failed**\n\n**Error:** ${error.message || 'Unknown error'}`);
+    }
+  }
+
+  /**
+   * Handle custom take profit price input
+   */
+  private async handleCustomTakeProfit(ctx: BotContext, symbol: string): Promise<void> {
+    try {
+      await ctx.answerCbQuery('📝 Enter custom take profit price...');
+      
+      const customText = [
+        `📝 **Custom Take Profit for ${symbol}**`,
+        '',
+        '🎯 **Enter your take profit price:**',
+        '',
+        '⚠️ *Please enter the exact price where you want to take profits.*',
+        '',
+        '💡 **Tips:**',
+        '• For LONG positions: Enter price ABOVE current price',
+        '• For SHORT positions: Enter price BELOW current price',
+        '• Use decimal format (e.g. 42.1234)'
+      ].join('\n');
+      
+      const keyboard = Markup.inlineKeyboard([
+        [
+          Markup.button.callback('🔙 Back to Take Profit', `position_set_tp_${symbol}`)
+        ]
+      ]);
+      
+      await this.safeEditMessageText(ctx, customText, { parse_mode: 'Markdown', ...keyboard });
+      
+      // Set user state to expect TP price input
+      if (ctx.userState) {
+        ctx.userState.conversationState = {
+          step: 'waiting_custom_pair',
+          data: { symbol, action: 'take_profit' }
+        };
+      }
+      
+    } catch (error: any) {
+      console.error('Custom take profit error:', error);
+      await ctx.reply(`❌ **Setup Failed**\n\n**Error:** ${error.message || 'Unknown error'}`);
+    }
+  }
+
+  /**
+   * Handle market price stop loss (current price)
+   */
+  private async handleMarketStopLoss(ctx: BotContext, symbol: string): Promise<void> {
+    try {
+      await ctx.answerCbQuery('📊 Setting stop loss at market price...');
+      
+      const apiClient = await this.apiClientService.getOrCreateClient(ctx.userState!.userId);
+      
+      // Get current mark price
+      const ticker = await apiClient.get24hrTicker(symbol);
+      const currentPrice = parseFloat(ticker.lastPrice);
+      
+      // Execute stop loss at current market price
+      const result = await apiClient.setStopLoss(symbol, currentPrice);
+      
+      const successText = [
+        `✅ **Market Stop Loss Set**`,
+        '',
+        `🛡️ **Symbol:** ${symbol}`,
+        `💰 **Stop Price:** $${currentPrice.toFixed(6)} (Market)`,
+        `🆔 **Order ID:** ${result.orderId}`,
+        '',
+        '⚠️ *Stop loss set at current market price.*'
+      ].join('\n');
+      
+      const keyboard = Markup.inlineKeyboard([
+        [
+          Markup.button.callback('📊 View Position', `position_${symbol}`),
+          Markup.button.callback('🔙 Back to Positions', 'positions_menu')
+        ]
+      ]);
+      
+      await this.safeEditMessageText(ctx, successText, { parse_mode: 'Markdown', ...keyboard });
+      
+    } catch (error: any) {
+      console.error('Market stop loss error:', error);
+      await ctx.reply(`❌ **Market Stop Loss Failed**\n\n**Symbol:** ${symbol}\n**Error:** ${error.message || 'Unknown error'}`);
+    }
+  }
+
+  /**
+   * Handle market price take profit (current price)
+   */
+  private async handleMarketTakeProfit(ctx: BotContext, symbol: string): Promise<void> {
+    try {
+      await ctx.answerCbQuery('📊 Setting take profit at market price...');
+      
+      const apiClient = await this.apiClientService.getOrCreateClient(ctx.userState!.userId);
+      
+      // Get current mark price
+      const ticker = await apiClient.get24hrTicker(symbol);
+      const currentPrice = parseFloat(ticker.lastPrice);
+      
+      // Execute take profit at current market price
+      const result = await apiClient.setTakeProfit(symbol, currentPrice);
+      
+      const successText = [
+        `✅ **Market Take Profit Set**`,
+        '',
+        `🎯 **Symbol:** ${symbol}`,
+        `💰 **Target Price:** $${currentPrice.toFixed(6)} (Market)`,
+        `🆔 **Order ID:** ${result.orderId}`,
+        '',
+        '💰 *Take profit set at current market price.*'
+      ].join('\n');
+      
+      const keyboard = Markup.inlineKeyboard([
+        [
+          Markup.button.callback('📊 View Position', `position_${symbol}`),
+          Markup.button.callback('🔙 Back to Positions', 'positions_menu')
+        ]
+      ]);
+      
+      await this.safeEditMessageText(ctx, successText, { parse_mode: 'Markdown', ...keyboard });
+      
+    } catch (error: any) {
+      console.error('Market take profit error:', error);
+      await ctx.reply(`❌ **Market Take Profit Failed**\n\n**Symbol:** ${symbol}\n**Error:** ${error.message || 'Unknown error'}`);
     }
   }
 
@@ -3207,6 +3650,156 @@ Contact @AsterDEX\\_Support or visit docs.aster.exchange for detailed guides.
     } catch (error) {
       console.error('Manual token execution error:', error);
       await ctx.reply('❌ Failed to execute trade. Please try again.');
+    }
+  }
+
+  /**
+   * Handle custom TP/SL price input from user
+   */
+  private async handleCustomTPSLPriceText(ctx: BotContext, text: string): Promise<void> {
+    if (!ctx.userState?.conversationState?.data) return;
+    
+    const { symbol, action } = ctx.userState.conversationState.data;
+    if (!symbol || !action) return;
+    const price = parseFloat(text.trim());
+    
+    // Clear conversation state
+    ctx.userState.conversationState = undefined;
+    
+    if (isNaN(price) || price <= 0) {
+      await ctx.reply('❌ **Invalid Price**\n\nPlease enter a valid positive number.\n\nExample: 42.1234');
+      return;
+    }
+    
+    try {
+      const apiClient = await this.apiClientService.getOrCreateClient(ctx.userState.userId);
+      
+      // Get current position to validate the price
+      const positions = await apiClient.getPositionRisk();
+      const position = positions.find((p: any) => p.symbol === symbol && parseFloat(p.positionAmt) !== 0);
+      
+      if (!position) {
+        await ctx.reply(`❌ **No Open Position**\n\n**Symbol:** ${symbol}\n\nPosition may have been closed.`);
+        return;
+      }
+      
+      const positionSize = parseFloat(position.positionAmt);
+      const entryPrice = parseFloat(position.entryPrice);
+      const isLong = positionSize > 0;
+      
+      // Validate price direction
+      if (action === 'stop_loss') {
+        // Stop loss validation
+        if ((isLong && price >= entryPrice) || (!isLong && price <= entryPrice)) {
+          const direction = isLong ? 'below' : 'above';
+          await ctx.reply(
+            `❌ **Invalid Stop Loss Price**\n\n` +
+            `**Position:** ${isLong ? 'LONG' : 'SHORT'}\n` +
+            `**Entry Price:** $${entryPrice.toFixed(6)}\n` +
+            `**Your Price:** $${price.toFixed(6)}\n\n` +
+            `⚠️ Stop loss must be ${direction} entry price for ${isLong ? 'LONG' : 'SHORT'} positions.`
+          );
+          return;
+        }
+        
+        // Execute stop loss
+        const result = await apiClient.setStopLoss(symbol, price);
+        const riskPercent = Math.abs((price - entryPrice) / entryPrice * 100);
+        
+        const successText = [
+          `✅ **Custom Stop Loss Set**`,
+          '',
+          `🛡️ **Symbol:** ${symbol}`,
+          `💰 **Stop Price:** $${price.toFixed(6)}`,
+          `📊 **Risk Level:** ${riskPercent.toFixed(1)}%`,
+          `🆔 **Order ID:** ${result.orderId}`,
+          '',
+          '⚠️ *Your position is now protected with a custom stop loss.*'
+        ].join('\n');
+        
+        const keyboard = Markup.inlineKeyboard([
+          [
+            Markup.button.callback('📊 View Position', `position_${symbol}`),
+            Markup.button.callback('🎯 Set Take Profit', `position_set_tp_${symbol}`)
+          ],
+          [
+            Markup.button.callback('🔙 Back to Positions', 'positions_menu')
+          ]
+        ]);
+        
+        await ctx.reply(successText, { parse_mode: 'Markdown', ...keyboard });
+        
+        // Emit event
+        this.eventEmitter.emitEvent({
+          type: EventTypes.TRADE_EXECUTED,
+          timestamp: new Date(),
+          userId: ctx.userState.userId,
+          telegramId: ctx.userState.telegramId,
+          correlationId: ctx.correlationId,
+          symbol,
+          action: 'STOP_LOSS',
+          price: price.toString(),
+          orderId: result.orderId
+        });
+        
+      } else if (action === 'take_profit') {
+        // Take profit validation
+        if ((isLong && price <= entryPrice) || (!isLong && price >= entryPrice)) {
+          const direction = isLong ? 'above' : 'below';
+          await ctx.reply(
+            `❌ **Invalid Take Profit Price**\n\n` +
+            `**Position:** ${isLong ? 'LONG' : 'SHORT'}\n` +
+            `**Entry Price:** $${entryPrice.toFixed(6)}\n` +
+            `**Your Price:** $${price.toFixed(6)}\n\n` +
+            `⚠️ Take profit must be ${direction} entry price for ${isLong ? 'LONG' : 'SHORT'} positions.`
+          );
+          return;
+        }
+        
+        // Execute take profit
+        const result = await apiClient.setTakeProfit(symbol, price);
+        const profitPercent = Math.abs((price - entryPrice) / entryPrice * 100);
+        
+        const successText = [
+          `✅ **Custom Take Profit Set**`,
+          '',
+          `🎯 **Symbol:** ${symbol}`,
+          `💰 **Target Price:** $${price.toFixed(6)}`,
+          `📊 **Profit Target:** ${profitPercent.toFixed(1)}%`,
+          `🆔 **Order ID:** ${result.orderId}`,
+          '',
+          '💰 *Your position will close automatically when target is reached.*'
+        ].join('\n');
+        
+        const keyboard = Markup.inlineKeyboard([
+          [
+            Markup.button.callback('📊 View Position', `position_${symbol}`),
+            Markup.button.callback('🛡️ Set Stop Loss', `position_set_sl_${symbol}`)
+          ],
+          [
+            Markup.button.callback('🔙 Back to Positions', 'positions_menu')
+          ]
+        ]);
+        
+        await ctx.reply(successText, { parse_mode: 'Markdown', ...keyboard });
+        
+        // Emit event
+        this.eventEmitter.emitEvent({
+          type: EventTypes.TRADE_EXECUTED,
+          timestamp: new Date(),
+          userId: ctx.userState.userId,
+          telegramId: ctx.userState.telegramId,
+          correlationId: ctx.correlationId,
+          symbol,
+          action: 'TAKE_PROFIT',
+          price: price.toString(),
+          orderId: result.orderId
+        });
+      }
+      
+    } catch (error: any) {
+      console.error('Custom TP/SL price error:', error);
+      await ctx.reply(`❌ **Failed to Set ${action === 'stop_loss' ? 'Stop Loss' : 'Take Profit'}**\n\n**Error:** ${error.message || 'Unknown error'}\n\n🔄 Please try again.`);
     }
   }
 
