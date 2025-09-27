@@ -14,7 +14,7 @@ export class NavigationHandler extends BaseHandler {
         const welcomeText = `
 **Welcome to AsterBot — Your Aster Telegram Terminal**
 
-Trade Aster DEX directly on Telegram, faster, more convenient and always at your fingertips. Execute trades instantly, manage positions in real time, receive live alerts, and control your wallets without switching platforms. All powered via the official @aster_Dex API
+Trade Aster DEX directly on Telegram, faster, more convenient and always at your fingertips. Execute trades instantly, manage positions in real time, receive live alerts, and control your wallets without switching platforms. All powered via the official @aster\\_Dex API
 
 • 🔒 **Secure API Execution** — Your keys, your control
 • ✅ **Spot & Perpetual Trading** — Access the full market

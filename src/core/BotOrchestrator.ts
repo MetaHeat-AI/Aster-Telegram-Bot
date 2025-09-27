@@ -1032,7 +1032,7 @@ Your complete guide to professional Telegram trading with AsterBot. Learn how to
 • Real-time risk monitoring
 
 **📞 Need More Help?**
-Contact @AsterDEX_Support or visit docs.aster.exchange for detailed guides.
+Contact @AsterDEX\\_Support or visit docs.aster.exchange for detailed guides.
     `.trim();
 
     await ctx.reply(helpText, { parse_mode: 'Markdown' });
