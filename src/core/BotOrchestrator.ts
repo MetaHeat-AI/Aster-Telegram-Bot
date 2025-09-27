@@ -490,7 +490,7 @@ export class BotOrchestrator {
         const apiClient = await this.apiClientService.getOrCreateClient(ctx.userState.userId);
 
         // Execute the trade using the ORIGINAL working approach
-        const orderResult = await apiClient.createOrder({
+        const orderResult = await apiClient.createSpotOrder({
           symbol,
           side,
           type: 'MARKET',
@@ -597,9 +597,10 @@ export class BotOrchestrator {
         // Set leverage first
         await apiClient.changeLeverage(symbol, leverage);
         
-        // Calculate quantity using ORIGINAL working approach (margin amount, not notional)
+        // Calculate quantity using ORIGINAL working approach with proper precision
         const currentPrice = await this.priceService.getCurrentPrice(symbol);
-        const quantity = (amount / currentPrice).toFixed(8); // ← Use margin amount directly like original
+        const rawQuantity = amount / currentPrice;
+        const quantity = await this.formatQuantityWithPrecision(apiClient, symbol, rawQuantity);
 
         // Execute the trade
         const orderResult = await apiClient.createOrder({
@@ -677,6 +678,37 @@ export class BotOrchestrator {
         error: error as Error,
         context: { type: 'perps_execute_action', symbol, side, amount, leverage }
       });
+    }
+  }
+
+  /**
+   * Format quantity with proper precision based on symbol's LOT_SIZE filter
+   * This prevents "Precision is over the maximum defined" errors
+   */
+  private async formatQuantityWithPrecision(apiClient: any, symbol: string, rawQuantity: number): Promise<string> {
+    try {
+      const exchangeInfo = await apiClient.getExchangeInfo();
+      const symbolInfo = exchangeInfo.symbols.find((s: any) => s.symbol === symbol);
+      
+      if (symbolInfo) {
+        const lotSizeFilter = symbolInfo.filters.find((f: any) => f.filterType === 'LOT_SIZE');
+        if (lotSizeFilter) {
+          const stepSize = parseFloat(lotSizeFilter.stepSize);
+          const adjustedQuantity = Math.floor(rawQuantity / stepSize) * stepSize;
+          const decimalPlaces = lotSizeFilter.stepSize.split('.')[1]?.length || 0;
+          const formattedQuantity = adjustedQuantity.toFixed(decimalPlaces);
+          
+          console.log(`[PRECISION] ${symbol} - Raw: ${rawQuantity}, Adjusted: ${formattedQuantity}, StepSize: ${stepSize}`);
+          return formattedQuantity;
+        }
+      }
+      
+      // Fallback to 6 decimal places
+      console.warn(`[PRECISION] No LOT_SIZE filter found for ${symbol}, using default precision`);
+      return rawQuantity.toFixed(6);
+    } catch (error) {
+      console.warn(`[PRECISION] Failed to get precision for ${symbol}, using default:`, error);
+      return rawQuantity.toFixed(6);
     }
   }
 
