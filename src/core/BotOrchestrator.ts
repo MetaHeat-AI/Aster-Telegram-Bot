@@ -315,26 +315,7 @@ export class BotOrchestrator {
       this.tradingHandler.handlePerpsTrading(ctx)
     );
 
-    // Dynamic symbol trading actions
-    this.bot.action(/^perps_buy_(.+)$/, (ctx) => {
-      const symbol = ctx.match[1];
-      this.tradingHandler.handlePerpsSymbolTrading(ctx, symbol, 'BUY');
-    });
-
-    this.bot.action(/^perps_sell_(.+)$/, (ctx) => {
-      const symbol = ctx.match[1];
-      this.tradingHandler.handlePerpsSymbolTrading(ctx, symbol, 'SELL');
-    });
-
-    this.bot.action(/^spot_buy_(.+)$/, (ctx) => {
-      const symbol = ctx.match[1];
-      this.tradingHandler.handleSpotSymbolTrading(ctx, symbol, 'BUY');
-    });
-
-    this.bot.action(/^spot_sell_(.+)$/, (ctx) => {
-      const symbol = ctx.match[1];
-      this.tradingHandler.handleSpotSymbolTrading(ctx, symbol, 'SELL');
-    });
+    // These broad patterns are REMOVED to avoid conflicts with specific USDT patterns below
 
     // Basic action handlers
     this.bot.action('balance', (ctx) => 
@@ -453,7 +434,10 @@ export class BotOrchestrator {
     });
 
     this.bot.action(/^quick_(buy|sell)_(\d+)([up%])_(.+)$/, (ctx) => {
-      const [, side, amount, unit, symbol] = ctx.match;
+      const side = ctx.match[1];           // 'buy' or 'sell'
+      const amount = parseInt(ctx.match[2]); // amount number
+      const unit = ctx.match[3];           // 'u' for USDT, 'p' for percentage  
+      const symbol = ctx.match[4];         // symbol name
       const unitText = unit === 'u' ? 'USDT' : '%';
       this.handlePlaceholderAction(ctx, `⚡ Quick ${side} ${amount}${unitText} ${symbol} - Feature coming soon!`);
     });
@@ -463,15 +447,17 @@ export class BotOrchestrator {
       this.handlePositionsCommand(ctx)
     );
 
-    // Alternative spot/perps symbol patterns from original
+    // EXACT original spot/perps symbol patterns (USDT symbols only)
     this.bot.action(/^spot_(buy|sell)_([A-Z0-9]+USDT)$/, (ctx) => {
-      const [, side, symbol] = ctx.match;
-      this.tradingHandler.handleSpotSymbolTrading(ctx, symbol, side.toUpperCase() as 'BUY' | 'SELL');
+      const action = ctx.match[1];  // 'buy' or 'sell'
+      const symbol = ctx.match[2];  // 'BTCUSDT', 'ETHUSDT', etc.
+      this.tradingHandler.handleSpotSymbolTrading(ctx, symbol, action.toUpperCase() as 'BUY' | 'SELL');
     });
 
     this.bot.action(/^perps_(buy|sell)_([A-Z0-9]+USDT)$/, (ctx) => {
-      const [, side, symbol] = ctx.match;
-      this.tradingHandler.handlePerpsSymbolTrading(ctx, symbol, side.toUpperCase() as 'BUY' | 'SELL');
+      const action = ctx.match[1];  // 'buy' or 'sell'
+      const symbol = ctx.match[2];  // 'BTCUSDT', 'ETHUSDT', etc.
+      this.tradingHandler.handlePerpsSymbolTrading(ctx, symbol, action.toUpperCase() as 'BUY' | 'SELL');
     });
 
     // Spot asset selling handlers
