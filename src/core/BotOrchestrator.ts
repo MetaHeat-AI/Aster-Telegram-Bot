@@ -276,6 +276,70 @@ export class BotOrchestrator {
       this.tradingHandler.handleSpotSymbolTrading(ctx, symbol, 'SELL');
     });
 
+    // Basic action handlers
+    this.bot.action('balance', (ctx) => 
+      this.handlePlaceholderAction(ctx, '💰 Balance feature coming soon!')
+    );
+
+    this.bot.action('positions', (ctx) => 
+      this.handlePlaceholderAction(ctx, '📊 Positions feature coming soon!')
+    );
+
+    this.bot.action('settings', (ctx) => 
+      this.handlePlaceholderAction(ctx, '⚙️ Settings feature coming soon!')
+    );
+
+    this.bot.action('help', (ctx) => 
+      this.handlePlaceholderAction(ctx, '📖 Help feature coming soon!')
+    );
+
+    this.bot.action('link_api', (ctx) => 
+      this.handlePlaceholderAction(ctx, '🔗 API linking feature coming soon!')
+    );
+
+    this.bot.action('spot_assets', (ctx) => 
+      this.handlePlaceholderAction(ctx, '🏦 Spot assets feature coming soon!')
+    );
+
+    this.bot.action('spot_sell_menu', (ctx) => 
+      this.handlePlaceholderAction(ctx, '💱 Spot sell menu coming soon!')
+    );
+
+    this.bot.action('spot_custom_pair', (ctx) => 
+      this.handlePlaceholderAction(ctx, '🎯 Custom spot pair feature coming soon!')
+    );
+
+    this.bot.action('perps_custom_pair', (ctx) => 
+      this.handlePlaceholderAction(ctx, '🎯 Custom perps pair feature coming soon!')
+    );
+
+    this.bot.action('pnl_analysis', (ctx) => 
+      this.handlePlaceholderAction(ctx, '📈 P&L Analysis feature coming soon!')
+    );
+
+    // Spot execute trade handlers
+    this.bot.action(/^spot_execute_(buy|sell)_(.+)_(\d+)u$/, (ctx) => {
+      const [, side, symbol, amount] = ctx.match;
+      this.handleSpotExecuteAction(ctx, symbol, side.toUpperCase() as 'BUY' | 'SELL', parseInt(amount));
+    });
+
+    // Perps execute trade handlers
+    this.bot.action(/^perps_execute_(buy|sell)_(.+)_(\d+)u_(\d+)x$/, (ctx) => {
+      const [, side, symbol, amount, leverage] = ctx.match;
+      this.handlePerpsExecuteAction(ctx, symbol, side.toUpperCase() as 'BUY' | 'SELL', parseInt(amount), parseInt(leverage));
+    });
+
+    // Custom amount handlers
+    this.bot.action(/^spot_custom_amount_(buy|sell)_(.+)$/, (ctx) => {
+      const [, side, symbol] = ctx.match;
+      this.handlePlaceholderAction(ctx, `💰 Custom ${side} ${symbol} - Feature coming soon!`);
+    });
+
+    this.bot.action(/^perps_custom_amount_(buy|sell)_(.+)$/, (ctx) => {
+      const [, side, symbol] = ctx.match;
+      this.handlePlaceholderAction(ctx, `💰 Custom ${side} ${symbol} - Feature coming soon!`);
+    });
+
     console.log('[Orchestrator] Actions registered');
   }
 
@@ -320,7 +384,7 @@ export class BotOrchestrator {
       this.server.use(await this.bot.createWebhook({
         domain: this.config.webhook.url.replace('/webhook', ''),
         path: this.config.webhook.path,
-        secretToken: this.config.webhook.secretToken
+        secret_token: this.config.webhook.secretToken
       }));
       console.log(`[Server] ✅ Webhook endpoint created at ${this.config.webhook.path}`);
 
@@ -366,6 +430,103 @@ export class BotOrchestrator {
     } catch (error) {
       console.error('Failed to start bot:', error);
       throw error;
+    }
+  }
+
+  /**
+   * Handle placeholder actions with coming soon messages
+   */
+  private async handlePlaceholderAction(ctx: BotContext, message: string): Promise<void> {
+    try {
+      await ctx.answerCbQuery(message);
+      await ctx.reply(message + '\n\n🔙 Use /menu to return to main menu.');
+    } catch (error) {
+      console.error('[Orchestrator] Placeholder action error:', error);
+      this.eventEmitter.emitEvent({
+        type: EventTypes.ERROR_OCCURRED,
+        timestamp: new Date(),
+        userId: ctx.userState?.userId || 0,
+        telegramId: ctx.userState?.telegramId || 0,
+        correlationId: ctx.correlationId,
+        error: error as Error,
+        context: { type: 'placeholder_action' }
+      });
+    }
+  }
+
+  /**
+   * Handle spot trade execution
+   */
+  private async handleSpotExecuteAction(
+    ctx: BotContext, 
+    symbol: string, 
+    side: 'BUY' | 'SELL', 
+    amount: number
+  ): Promise<void> {
+    try {
+      const action = side === 'BUY' ? 'Buy' : 'Sell';
+      const emoji = side === 'BUY' ? '🟢' : '🔴';
+      
+      await ctx.answerCbQuery(`${emoji} ${action} ${symbol} $${amount} - Coming soon!`);
+      await ctx.reply(
+        `${emoji} **Spot ${action} Order**\n\n` +
+        `**Symbol:** ${symbol}\n` +
+        `**Amount:** $${amount}\n` +
+        `**Type:** ${action}\n\n` +
+        `🚧 Trade execution feature coming soon!\n\n` +
+        `🔙 Use /menu to return to main menu.`,
+        { parse_mode: 'Markdown' }
+      );
+    } catch (error) {
+      console.error('[Orchestrator] Spot execute action error:', error);
+      this.eventEmitter.emitEvent({
+        type: EventTypes.ERROR_OCCURRED,
+        timestamp: new Date(),
+        userId: ctx.userState?.userId || 0,
+        telegramId: ctx.userState?.telegramId || 0,
+        correlationId: ctx.correlationId,
+        error: error as Error,
+        context: { type: 'spot_execute_action', symbol, side, amount }
+      });
+    }
+  }
+
+  /**
+   * Handle perps trade execution
+   */
+  private async handlePerpsExecuteAction(
+    ctx: BotContext, 
+    symbol: string, 
+    side: 'BUY' | 'SELL', 
+    amount: number,
+    leverage: number
+  ): Promise<void> {
+    try {
+      const action = side === 'BUY' ? 'Long' : 'Short';
+      const emoji = side === 'BUY' ? '📈' : '📉';
+      
+      await ctx.answerCbQuery(`${emoji} ${action} ${symbol} $${amount} ${leverage}x - Coming soon!`);
+      await ctx.reply(
+        `${emoji} **Perps ${action} Order**\n\n` +
+        `**Symbol:** ${symbol}\n` +
+        `**Amount:** $${amount}\n` +
+        `**Leverage:** ${leverage}x\n` +
+        `**Type:** ${action}\n\n` +
+        `🚧 Trade execution feature coming soon!\n\n` +
+        `🔙 Use /menu to return to main menu.`,
+        { parse_mode: 'Markdown' }
+      );
+    } catch (error) {
+      console.error('[Orchestrator] Perps execute action error:', error);
+      this.eventEmitter.emitEvent({
+        type: EventTypes.ERROR_OCCURRED,
+        timestamp: new Date(),
+        userId: ctx.userState?.userId || 0,
+        telegramId: ctx.userState?.telegramId || 0,
+        correlationId: ctx.correlationId,
+        error: error as Error,
+        context: { type: 'perps_execute_action', symbol, side, amount, leverage }
+      });
     }
   }
 
