@@ -488,18 +488,13 @@ export class BotOrchestrator {
       try {
         // Get API client for user
         const apiClient = await this.apiClientService.getOrCreateClient(ctx.userState.userId);
-        
-        // Calculate quantity based on USDT amount
-        const currentPrice = await this.priceService.getCurrentPrice(symbol);
-        const quantity = (amount / currentPrice).toFixed(8);
 
-        // Execute the trade
+        // Execute the trade using the ORIGINAL working approach
         const orderResult = await apiClient.createOrder({
           symbol,
           side,
           type: 'MARKET',
-          quantity: side === 'BUY' ? quantity : undefined,
-          quoteOrderQty: side === 'BUY' ? amount.toString() : undefined
+          quoteOrderQty: amount.toString() // ← Use original approach: direct USDT amount
         });
 
         // Success message
@@ -511,7 +506,7 @@ export class BotOrchestrator {
           `**Symbol:** ${symbol}\n` +
           `**Amount:** $${amount}\n` +
           `**Quantity:** ${orderResult.executedQty}\n` +
-          `**Price:** $${orderResult.avgPrice || currentPrice.toFixed(6)}\n` +
+          `**Avg Price:** $${orderResult.avgPrice || 'N/A'}\n` +
           `**Order ID:** ${orderResult.orderId}\n\n` +
           `🎉 Trade completed successfully!\n\n` +
           `🔙 Use /menu to return to main menu.`,
@@ -602,10 +597,9 @@ export class BotOrchestrator {
         // Set leverage first
         await apiClient.changeLeverage(symbol, leverage);
         
-        // Calculate quantity based on USDT amount and leverage
+        // Calculate quantity using ORIGINAL working approach (margin amount, not notional)
         const currentPrice = await this.priceService.getCurrentPrice(symbol);
-        const totalNotional = amount * leverage;
-        const quantity = (totalNotional / currentPrice).toFixed(8);
+        const quantity = (amount / currentPrice).toFixed(8); // ← Use margin amount directly like original
 
         // Execute the trade
         const orderResult = await apiClient.createOrder({
@@ -614,6 +608,14 @@ export class BotOrchestrator {
           type: 'MARKET',
           quantity
         });
+
+        // Mark trade executed for position update timing (like original)
+        try {
+          const futuresService = new (await import('../services/FuturesAccountService')).FuturesAccountService(apiClient);
+          futuresService.markTradeExecuted();
+        } catch (error) {
+          console.warn('[Orchestrator] Could not mark trade executed:', error);
+        }
 
         // Success message
         await ctx.telegram.editMessageText(
