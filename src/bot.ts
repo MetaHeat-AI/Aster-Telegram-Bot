@@ -275,13 +275,7 @@ Choose an action below to get started:
 
     // Price command
     this.bot.command('price', async (ctx) => {
-      const symbol = ctx.message.text.split(' ')[1]?.toUpperCase();
-      if (!symbol) {
-        await ctx.reply('Please specify a symbol: /price BTCUSDT');
-        return;
-      }
-      
-      await this.handlePriceCommand(ctx, symbol);
+      await this.handlePriceMenuCommand(ctx);
     });
 
     // Trade command - unified trading interface with spot/perps selection
@@ -476,6 +470,36 @@ Choose an action below to get started:
 
     this.bot.action('spot_assets', async (ctx) => {
       await this.handleSpotAssetsCommand(ctx);
+    });
+
+    // Price discovery action handlers
+    this.bot.action('price_menu', async (ctx) => {
+      await this.handlePriceMenuCommand(ctx);
+    });
+
+    this.bot.action('price_top_mcap', async (ctx) => {
+      await this.handleTopMarketCapPrices(ctx);
+    });
+
+    this.bot.action('price_top_volume', async (ctx) => {
+      await this.handleTopVolumePrices(ctx);
+    });
+
+    this.bot.action('price_watchlist', async (ctx) => {
+      await this.handlePriceWatchlist(ctx);
+    });
+
+    this.bot.action(/^price_token_([A-Z0-9]+USDT)$/, async (ctx) => {
+      const symbol = ctx.match[1];
+      await this.handleSingleTokenPrice(ctx, symbol);
+    });
+
+    this.bot.action('price_compare', async (ctx) => {
+      await this.handlePriceComparison(ctx);
+    });
+
+    this.bot.action('price_all_markets', async (ctx) => {
+      await this.handleAllMarkets(ctx);
     });
 
     // Spot sell individual asset actions
@@ -1945,27 +1969,495 @@ ${trade.maxSlippageExceeded ? '\n❌ **Max slippage exceeded**' : ''}
     }
   }
 
-  private async handlePriceCommand(ctx: BotContext, symbol: string): Promise<void> {
+  private async handlePriceMenuCommand(ctx: BotContext): Promise<void> {
     try {
-      // Use a default API client for public data
+      const priceMenuText = [
+        '💹 **Price Discovery Center**',
+        '',
+        '📊 Get real-time prices and market data for cryptocurrencies on Aster DEX',
+        '',
+        '**Quick Access:**',
+        '• Market leaders by market cap',
+        '• Top volume tokens today', 
+        '• Personal watchlist',
+        '• Individual token lookup',
+        '• Price comparison tools',
+        '',
+        '**Choose your price discovery method:**'
+      ].join('\n');
+
+      const keyboard = Markup.inlineKeyboard([
+        [
+          Markup.button.callback('🏆 Top 10 by Market Cap', 'price_top_mcap'),
+          Markup.button.callback('📈 Top 10 by Volume', 'price_top_volume')
+        ],
+        [
+          Markup.button.callback('⭐ Quick Tokens', 'price_watchlist')
+        ],
+        [
+          Markup.button.callback('🔍 Compare Prices', 'price_compare'),
+          Markup.button.callback('📊 All Markets', 'price_all_markets')
+        ],
+        [
+          Markup.button.callback('🔙 Back', 'main_menu')
+        ]
+      ]);
+
+      try {
+        await ctx.editMessageText(priceMenuText, { parse_mode: 'Markdown', ...keyboard });
+      } catch (error) {
+        await ctx.reply(priceMenuText, { parse_mode: 'Markdown', ...keyboard });
+      }
+
+    } catch (error) {
+      console.error('[PRICE MENU] Error:', error);
+      await ctx.reply('❌ Failed to load price menu. Please try again.');
+    }
+  }
+
+  private async handleTopMarketCapPrices(ctx: BotContext): Promise<void> {
+    try {
+      console.log('[PRICE] Fetching top market cap tokens...');
+      
+      // Get top tokens by volume as proxy for market cap (since we don't have market cap data)
+      const apiClient = new AsterApiClient(this.config.aster.baseUrl, '', '');
+      const allTickers = await apiClient.getAllFuturesTickers();
+      
+      // Filter and sort by quote volume (USDT volume)
+      const topTokens = allTickers
+        .filter(ticker => ticker.symbol.endsWith('USDT'))
+        .sort((a, b) => parseFloat(b.quoteVolume || '0') - parseFloat(a.quoteVolume || '0'))
+        .slice(0, 10);
+
+      let priceText = [
+        '🏆 **Top 10 Tokens by Market Activity**',
+        '',
+        '_Sorted by 24h trading volume (proxy for market cap)_',
+        ''
+      ].join('\n');
+
+      topTokens.forEach((ticker, index) => {
+        const rank = index + 1;
+        const symbol = ticker.symbol.replace('USDT', '');
+        const price = parseFloat(ticker.lastPrice).toFixed(6);
+        const change = parseFloat(ticker.priceChangePercent).toFixed(2);
+        const changeEmoji = parseFloat(ticker.priceChangePercent) >= 0 ? '🟢' : '🔴';
+        const volume = (parseFloat(ticker.quoteVolume || '0') / 1000000).toFixed(1);
+        
+        priceText += `**${rank}.** ${symbol} - $${price} ${changeEmoji}${change}%\n`;
+        priceText += `    Volume: $${volume}M\n\n`;
+      });
+
+      // Create buttons for individual tokens
+      const tokenButtons = [];
+      for (let i = 0; i < topTokens.length; i += 2) {
+        const row = [];
+        const token1 = topTokens[i];
+        const token2 = topTokens[i + 1];
+        
+        row.push(Markup.button.callback(
+          `${token1.symbol.replace('USDT', '')}`, 
+          `price_token_${token1.symbol}`
+        ));
+        
+        if (token2) {
+          row.push(Markup.button.callback(
+            `${token2.symbol.replace('USDT', '')}`, 
+            `price_token_${token2.symbol}`
+          ));
+        }
+        
+        tokenButtons.push(row);
+      }
+
+      const keyboard = Markup.inlineKeyboard([
+        ...tokenButtons,
+        [
+          Markup.button.callback('🔄 Refresh', 'price_top_mcap'),
+          Markup.button.callback('📈 Top Volume', 'price_top_volume')
+        ],
+        [
+          Markup.button.callback('💹 Price Menu', 'price_menu'),
+          Markup.button.callback('🔙 Back', 'main_menu')
+        ]
+      ]);
+
+      try {
+        await ctx.editMessageText(priceText, { parse_mode: 'Markdown', ...keyboard });
+      } catch (error) {
+        await ctx.reply(priceText, { parse_mode: 'Markdown', ...keyboard });
+      }
+
+    } catch (error) {
+      console.error('[PRICE] Error fetching market cap data:', error);
+      await ctx.reply('❌ Failed to fetch market cap data. Please try again.');
+    }
+  }
+
+  private async handleTopVolumePrices(ctx: BotContext): Promise<void> {
+    try {
+      console.log('[PRICE] Fetching top volume tokens...');
+      
+      const apiClient = new AsterApiClient(this.config.aster.baseUrl, '', '');
+      const allTickers = await apiClient.getAllFuturesTickers();
+      
+      // Sort by actual trading volume
+      const topVolumeTokens = allTickers
+        .filter(ticker => ticker.symbol.endsWith('USDT'))
+        .sort((a, b) => parseFloat(b.volume || '0') - parseFloat(a.volume || '0'))
+        .slice(0, 10);
+
+      let priceText = [
+        '📈 **Top 10 Tokens by 24h Volume**',
+        '',
+        '_Highest trading activity in the last 24 hours_',
+        ''
+      ].join('\n');
+
+      topVolumeTokens.forEach((ticker, index) => {
+        const rank = index + 1;
+        const symbol = ticker.symbol.replace('USDT', '');
+        const price = parseFloat(ticker.lastPrice).toFixed(6);
+        const change = parseFloat(ticker.priceChangePercent).toFixed(2);
+        const changeEmoji = parseFloat(ticker.priceChangePercent) >= 0 ? '🟢' : '🔴';
+        const volume = parseFloat(ticker.volume || '0');
+        const volumeFormatted = volume > 1000000 ? 
+          `${(volume / 1000000).toFixed(1)}M` : 
+          `${(volume / 1000).toFixed(0)}K`;
+        
+        priceText += `**${rank}.** ${symbol} - $${price} ${changeEmoji}${change}%\n`;
+        priceText += `    Volume: ${volumeFormatted} tokens\n\n`;
+      });
+
+      // Create buttons for individual tokens
+      const tokenButtons = [];
+      for (let i = 0; i < topVolumeTokens.length; i += 2) {
+        const row = [];
+        const token1 = topVolumeTokens[i];
+        const token2 = topVolumeTokens[i + 1];
+        
+        row.push(Markup.button.callback(
+          `${token1.symbol.replace('USDT', '')}`, 
+          `price_token_${token1.symbol}`
+        ));
+        
+        if (token2) {
+          row.push(Markup.button.callback(
+            `${token2.symbol.replace('USDT', '')}`, 
+            `price_token_${token2.symbol}`
+          ));
+        }
+        
+        tokenButtons.push(row);
+      }
+
+      const keyboard = Markup.inlineKeyboard([
+        ...tokenButtons,
+        [
+          Markup.button.callback('🔄 Refresh', 'price_top_volume'),
+          Markup.button.callback('🏆 Top Market Cap', 'price_top_mcap')
+        ],
+        [
+          Markup.button.callback('💹 Price Menu', 'price_menu'),
+          Markup.button.callback('🔙 Back', 'main_menu')
+        ]
+      ]);
+
+      try {
+        await ctx.editMessageText(priceText, { parse_mode: 'Markdown', ...keyboard });
+      } catch (error) {
+        await ctx.reply(priceText, { parse_mode: 'Markdown', ...keyboard });
+      }
+
+    } catch (error) {
+      console.error('[PRICE] Error fetching volume data:', error);
+      await ctx.reply('❌ Failed to fetch volume data. Please try again.');
+    }
+  }
+
+  private async handlePriceWatchlist(ctx: BotContext): Promise<void> {
+    try {
+      const quickTokens = ['BTCUSDT', 'ETHUSDT', 'ASTERUSDT', 'ADAUSDT', 'SOLUSDT', 'LINKUSDT', 'ATOMUSDT', 'DOTUSDT'];
+      
+      console.log('[PRICE] Fetching watchlist prices...');
+      const apiClient = new AsterApiClient(this.config.aster.baseUrl, '', '');
+      
+      // Fetch prices for all watchlist tokens
+      const pricePromises = quickTokens.map(async (symbol) => {
+        try {
+          const ticker = await apiClient.get24hrTicker(symbol);
+          return { symbol, ticker, success: true };
+        } catch (error) {
+          console.warn(`[PRICE] Failed to fetch ${symbol}:`, error);
+          return { symbol, ticker: null, success: false };
+        }
+      });
+
+      const results = await Promise.all(pricePromises);
+      const successResults = results.filter(r => r.success);
+
+      let priceText = [
+        '⭐ **Quick Token Watchlist**',
+        '',
+        '_Popular tokens with real-time prices_',
+        ''
+      ].join('\n');
+
+      successResults.forEach((result) => {
+        if (result.ticker) {
+          const symbol = result.symbol.replace('USDT', '');
+          const price = parseFloat(result.ticker.lastPrice).toFixed(6);
+          const change = parseFloat(result.ticker.priceChangePercent).toFixed(2);
+          const changeEmoji = parseFloat(result.ticker.priceChangePercent) >= 0 ? '🟢' : '🔴';
+          
+          priceText += `**${symbol}** - $${price} ${changeEmoji}${change}%\n`;
+        }
+      });
+
+      if (successResults.length === 0) {
+        priceText += '⚠️ Unable to fetch watchlist prices at the moment.\n';
+      }
+
+      // Create buttons for individual tokens
+      const tokenButtons = [];
+      for (let i = 0; i < successResults.length; i += 2) {
+        const row = [];
+        const token1 = successResults[i];
+        const token2 = successResults[i + 1];
+        
+        if (token1) {
+          row.push(Markup.button.callback(
+            `${token1.symbol.replace('USDT', '')}`, 
+            `price_token_${token1.symbol}`
+          ));
+        }
+        
+        if (token2) {
+          row.push(Markup.button.callback(
+            `${token2.symbol.replace('USDT', '')}`, 
+            `price_token_${token2.symbol}`
+          ));
+        }
+        
+        tokenButtons.push(row);
+      }
+
+      const keyboard = Markup.inlineKeyboard([
+        ...tokenButtons,
+        [
+          Markup.button.callback('🔄 Refresh', 'price_watchlist'),
+          Markup.button.callback('🔍 Compare', 'price_compare')
+        ],
+        [
+          Markup.button.callback('💹 Price Menu', 'price_menu'),
+          Markup.button.callback('🔙 Back', 'main_menu')
+        ]
+      ]);
+
+      try {
+        await ctx.editMessageText(priceText, { parse_mode: 'Markdown', ...keyboard });
+      } catch (error) {
+        await ctx.reply(priceText, { parse_mode: 'Markdown', ...keyboard });
+      }
+
+    } catch (error) {
+      console.error('[PRICE] Error fetching watchlist:', error);
+      await ctx.reply('❌ Failed to fetch watchlist prices. Please try again.');
+    }
+  }
+
+  private async handleSingleTokenPrice(ctx: BotContext, symbol: string): Promise<void> {
+    try {
+      console.log(`[PRICE] Fetching detailed info for ${symbol}...`);
+      
       const apiClient = new AsterApiClient(this.config.aster.baseUrl, '', '');
       const ticker = await apiClient.get24hrTicker(symbol);
       
+      const tokenName = symbol.replace('USDT', '');
+      const price = parseFloat(ticker.lastPrice);
+      const change = parseFloat(ticker.priceChangePercent);
+      const changeEmoji = change >= 0 ? '🟢' : '🔴';
+      const volume = parseFloat(ticker.volume || '0');
+      const quoteVolume = parseFloat(ticker.quoteVolume || '0');
+      
       const priceText = [
-        `📈 **${symbol} Price Info**`,
+        `📊 **${tokenName} (${symbol}) Price Analysis**`,
         '',
-        `💰 Last Price: $${ticker.lastPrice}`,
-        `📊 24h Change: ${ticker.priceChangePercent}%`,
-        `🔺 24h High: $${ticker.highPrice}`,
-        `🔻 24h Low: $${ticker.lowPrice}`,
-        `📦 24h Volume: ${ticker.volume}`,
+        `💰 **Current Price:** $${price.toFixed(6)}`,
+        `${changeEmoji} **24h Change:** ${change >= 0 ? '+' : ''}${change.toFixed(2)}%`,
+        '',
+        `📈 **24h High:** $${parseFloat(ticker.highPrice).toFixed(6)}`,
+        `📉 **24h Low:** $${parseFloat(ticker.lowPrice).toFixed(6)}`,
+        `📊 **24h Open:** $${parseFloat(ticker.openPrice).toFixed(6)}`,
+        '',
+        `📦 **Volume (${tokenName}):** ${volume > 1000000 ? `${(volume/1000000).toFixed(2)}M` : `${(volume/1000).toFixed(0)}K`}`,
+        `💵 **Volume (USDT):** $${quoteVolume > 1000000 ? `${(quoteVolume/1000000).toFixed(2)}M` : `${(quoteVolume/1000).toFixed(0)}K`}`,
+        '',
+        `⏰ **Last Updated:** ${new Date().toLocaleTimeString()}`
       ].join('\n');
 
-      await ctx.reply(priceText, { parse_mode: 'Markdown' });
+      const keyboard = Markup.inlineKeyboard([
+        [
+          Markup.button.callback('📈 Trade', `trade_${symbol}`),
+          Markup.button.callback('📊 Chart', `chart_${symbol}`)
+        ],
+        [
+          Markup.button.callback('🔄 Refresh', `price_token_${symbol}`),
+          Markup.button.callback('➕ Add Alert', `alert_${symbol}`)
+        ],
+        [
+          Markup.button.callback('💹 Price Menu', 'price_menu'),
+          Markup.button.callback('🔙 Back', 'main_menu')
+        ]
+      ]);
+
+      try {
+        await ctx.editMessageText(priceText, { parse_mode: 'Markdown', ...keyboard });
+      } catch (error) {
+        await ctx.reply(priceText, { parse_mode: 'Markdown', ...keyboard });
+      }
 
     } catch (error) {
-      console.error('Price command error:', error);
-      await ctx.reply(`❌ Failed to fetch price for ${symbol}. Please check the symbol.`);
+      console.error(`[PRICE] Error fetching ${symbol}:`, error);
+      await ctx.reply(`❌ Failed to fetch price for ${symbol}. Please check if the symbol is available.`);
+    }
+  }
+
+  private async handlePriceComparison(ctx: BotContext): Promise<void> {
+    try {
+      const compareTokens = ['BTCUSDT', 'ETHUSDT', 'ASTERUSDT', 'ADAUSDT'];
+      
+      console.log('[PRICE] Fetching comparison data...');
+      const apiClient = new AsterApiClient(this.config.aster.baseUrl, '', '');
+      
+      const results = await Promise.all(
+        compareTokens.map(async (symbol) => {
+          try {
+            const ticker = await apiClient.get24hrTicker(symbol);
+            return { symbol, ticker, success: true };
+          } catch (error) {
+            return { symbol, ticker: null, success: false };
+          }
+        })
+      );
+
+      const successResults = results.filter(r => r.success && r.ticker);
+
+      let compareText = [
+        '🔍 **Price Comparison**',
+        '',
+        '_Side-by-side comparison of major tokens_',
+        ''
+      ].join('\n');
+
+      successResults.forEach((result) => {
+        if (result.ticker) {
+          const symbol = result.symbol.replace('USDT', '');
+          const price = parseFloat(result.ticker.lastPrice).toFixed(6);
+          const change = parseFloat(result.ticker.priceChangePercent).toFixed(2);
+          const changeEmoji = parseFloat(result.ticker.priceChangePercent) >= 0 ? '🟢' : '🔴';
+          const volume = parseFloat(result.ticker.quoteVolume || '0') / 1000000;
+          
+          compareText += `**${symbol}:** $${price} ${changeEmoji}${change}% (Vol: $${volume.toFixed(1)}M)\n`;
+        }
+      });
+
+      const keyboard = Markup.inlineKeyboard([
+        [
+          Markup.button.callback('🔄 Refresh', 'price_compare'),
+          Markup.button.callback('📊 All Markets', 'price_all_markets')
+        ],
+        [
+          Markup.button.callback('💹 Price Menu', 'price_menu'),
+          Markup.button.callback('🔙 Back', 'main_menu')
+        ]
+      ]);
+
+      try {
+        await ctx.editMessageText(compareText, { parse_mode: 'Markdown', ...keyboard });
+      } catch (error) {
+        await ctx.reply(compareText, { parse_mode: 'Markdown', ...keyboard });
+      }
+
+    } catch (error) {
+      console.error('[PRICE] Error in comparison:', error);
+      await ctx.reply('❌ Failed to fetch comparison data. Please try again.');
+    }
+  }
+
+  private async handleAllMarkets(ctx: BotContext): Promise<void> {
+    try {
+      console.log('[PRICE] Fetching all markets overview...');
+      
+      const apiClient = new AsterApiClient(this.config.aster.baseUrl, '', '');
+      const allTickers = await apiClient.getAllFuturesTickers();
+      
+      // Get overview statistics
+      const usdtPairs = allTickers.filter(ticker => ticker.symbol.endsWith('USDT'));
+      const totalTokens = usdtPairs.length;
+      const gainers = usdtPairs.filter(t => parseFloat(t.priceChangePercent) > 0).length;
+      const losers = usdtPairs.filter(t => parseFloat(t.priceChangePercent) < 0).length;
+      
+      // Top gainers and losers
+      const topGainers = usdtPairs
+        .sort((a, b) => parseFloat(b.priceChangePercent) - parseFloat(a.priceChangePercent))
+        .slice(0, 3);
+      
+      const topLosers = usdtPairs
+        .sort((a, b) => parseFloat(a.priceChangePercent) - parseFloat(b.priceChangePercent))
+        .slice(0, 3);
+
+      let marketsText = [
+        '📊 **All Markets Overview**',
+        '',
+        `📈 **Market Summary:**`,
+        `• Total Pairs: ${totalTokens}`,
+        `• Gainers: ${gainers} (${((gainers/totalTokens)*100).toFixed(1)}%)`,
+        `• Losers: ${losers} (${((losers/totalTokens)*100).toFixed(1)}%)`,
+        '',
+        '🟢 **Top Gainers:**'
+      ].join('\n');
+
+      topGainers.forEach((ticker, index) => {
+        const symbol = ticker.symbol.replace('USDT', '');
+        const price = parseFloat(ticker.lastPrice).toFixed(6);
+        const change = parseFloat(ticker.priceChangePercent).toFixed(2);
+        marketsText += `\n${index + 1}. **${symbol}** - $${price} 🟢+${change}%`;
+      });
+
+      marketsText += '\n\n🔴 **Top Losers:**';
+
+      topLosers.forEach((ticker, index) => {
+        const symbol = ticker.symbol.replace('USDT', '');
+        const price = parseFloat(ticker.lastPrice).toFixed(6);
+        const change = parseFloat(ticker.priceChangePercent).toFixed(2);
+        marketsText += `\n${index + 1}. **${symbol}** - $${price} 🔴${change}%`;
+      });
+
+      const keyboard = Markup.inlineKeyboard([
+        [
+          Markup.button.callback('🏆 Top Market Cap', 'price_top_mcap'),
+          Markup.button.callback('📈 Top Volume', 'price_top_volume')
+        ],
+        [
+          Markup.button.callback('🔄 Refresh', 'price_all_markets'),
+          Markup.button.callback('⭐ Watchlist', 'price_watchlist')
+        ],
+        [
+          Markup.button.callback('💹 Price Menu', 'price_menu'),
+          Markup.button.callback('🔙 Back', 'main_menu')
+        ]
+      ]);
+
+      try {
+        await ctx.editMessageText(marketsText, { parse_mode: 'Markdown', ...keyboard });
+      } catch (error) {
+        await ctx.reply(marketsText, { parse_mode: 'Markdown', ...keyboard });
+      }
+
+    } catch (error) {
+      console.error('[PRICE] Error fetching all markets:', error);
+      await ctx.reply('❌ Failed to fetch markets overview. Please try again.');
     }
   }
 

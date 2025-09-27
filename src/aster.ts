@@ -373,7 +373,9 @@ export class AsterApiClient {
     priceChangePercent: string;
     highPrice: string;
     lowPrice: string;
+    openPrice: string;
     volume: string;
+    quoteVolume: string;
   }> {
     const response = await this.axios.get(`/fapi/v1/ticker/24hr?symbol=${symbol}`);
     return response.data;
