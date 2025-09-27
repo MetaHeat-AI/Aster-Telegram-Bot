@@ -2305,7 +2305,7 @@ Contact @AsterDEX\\_Support or visit docs.aster.exchange for detailed guides.
         `✅ **Stop Loss Set Successfully**`,
         '',
         `🛡️ **Symbol:** ${symbol}`,
-        `💰 **Stop Price:** $${stopPrice.toFixed(6)}`,
+        `💰 **Stop Price:** $${await this.formatPriceWithPrecision(apiClient, symbol, stopPrice)}`,
         `📊 **Risk Level:** ${riskPercent}%`,
         `🆔 **Order ID:** ${result.orderId}`,
         '',
@@ -2359,7 +2359,7 @@ Contact @AsterDEX\\_Support or visit docs.aster.exchange for detailed guides.
         `✅ **Take Profit Set Successfully**`,
         '',
         `🎯 **Symbol:** ${symbol}`,
-        `💰 **Target Price:** $${targetPrice.toFixed(6)}`,
+        `💰 **Target Price:** $${await this.formatPriceWithPrecision(apiClient, symbol, targetPrice)}`,
         `📊 **Profit Target:** ${profitPercent}%`,
         `🆔 **Order ID:** ${result.orderId}`,
         '',
@@ -2501,7 +2501,7 @@ Contact @AsterDEX\\_Support or visit docs.aster.exchange for detailed guides.
         `✅ **Market Stop Loss Set**`,
         '',
         `🛡️ **Symbol:** ${symbol}`,
-        `💰 **Stop Price:** $${currentPrice.toFixed(6)} (Market)`,
+        `💰 **Stop Price:** $${await this.formatPriceWithPrecision(apiClient, symbol, currentPrice)} (Market)`,
         `🆔 **Order ID:** ${result.orderId}`,
         '',
         '⚠️ *Stop loss set at current market price.*'
@@ -2542,7 +2542,7 @@ Contact @AsterDEX\\_Support or visit docs.aster.exchange for detailed guides.
         `✅ **Market Take Profit Set**`,
         '',
         `🎯 **Symbol:** ${symbol}`,
-        `💰 **Target Price:** $${currentPrice.toFixed(6)} (Market)`,
+        `💰 **Target Price:** $${await this.formatPriceWithPrecision(apiClient, symbol, currentPrice)} (Market)`,
         `🆔 **Order ID:** ${result.orderId}`,
         '',
         '💰 *Take profit set at current market price.*'
@@ -2591,6 +2591,39 @@ Contact @AsterDEX\\_Support or visit docs.aster.exchange for detailed guides.
     } catch (error) {
       console.warn(`[PRECISION] Failed to get precision for ${symbol}, using default:`, error);
       return rawQuantity.toFixed(6);
+    }
+  }
+
+  /**
+   * Format price to exchange precision requirements for TP/SL orders
+   * This prevents "Precision is over the maximum defined" errors for prices
+   */
+  private async formatPriceWithPrecision(apiClient: any, symbol: string, rawPrice: number): Promise<string> {
+    try {
+      const exchangeInfo = await apiClient.getExchangeInfo();
+      const symbolInfo = exchangeInfo.symbols.find((s: any) => s.symbol === symbol);
+      
+      if (symbolInfo) {
+        const priceFilter = symbolInfo.filters.find((f: any) => f.filterType === 'PRICE_FILTER');
+        if (priceFilter) {
+          const tickSize = parseFloat(priceFilter.tickSize);
+          const adjustedPrice = Math.round(rawPrice / tickSize) * tickSize;
+          const decimalPlaces = priceFilter.tickSize.split('.')[1]?.length || 0;
+          const formattedPrice = adjustedPrice.toFixed(decimalPlaces);
+          
+          console.log(`[PRECISION] ${symbol} - Raw Price: ${rawPrice}, Adjusted: ${formattedPrice}, TickSize: ${tickSize}`);
+          return formattedPrice;
+        }
+      }
+      
+      // Fallback: format based on price range
+      const decimalPlaces = rawPrice < 1 ? 6 : rawPrice < 100 ? 4 : 2;
+      console.warn(`[PRECISION] No PRICE_FILTER found for ${symbol}, using fallback precision: ${decimalPlaces}`);
+      return rawPrice.toFixed(decimalPlaces);
+    } catch (error) {
+      console.warn(`[PRECISION] Failed to get price precision for ${symbol}, using fallback:`, error);
+      const decimalPlaces = rawPrice < 1 ? 6 : rawPrice < 100 ? 4 : 2;
+      return rawPrice.toFixed(decimalPlaces);
     }
   }
 
@@ -4061,7 +4094,7 @@ Contact @AsterDEX\\_Support or visit docs.aster.exchange for detailed guides.
           `✅ **Custom Stop Loss Set**`,
           '',
           `🛡️ **Symbol:** ${symbol}`,
-          `💰 **Stop Price:** $${price.toFixed(6)}`,
+          `💰 **Stop Price:** $${await this.formatPriceWithPrecision(apiClient, symbol, price)}`,
           `📊 **Risk Level:** ${riskPercent.toFixed(1)}%`,
           `🆔 **Order ID:** ${result.orderId}`,
           '',
@@ -4115,7 +4148,7 @@ Contact @AsterDEX\\_Support or visit docs.aster.exchange for detailed guides.
           `✅ **Custom Take Profit Set**`,
           '',
           `🎯 **Symbol:** ${symbol}`,
-          `💰 **Target Price:** $${price.toFixed(6)}`,
+          `💰 **Target Price:** $${await this.formatPriceWithPrecision(apiClient, symbol, price)}`,
           `📊 **Profit Target:** ${profitPercent.toFixed(1)}%`,
           `🆔 **Order ID:** ${result.orderId}`,
           '',
@@ -4777,7 +4810,8 @@ Contact @AsterDEX\\_Support or visit docs.aster.exchange for detailed guides.
         
         try {
           tpOrderResult = await apiClient.setTakeProfit(symbol, tpPrice);
-          results.push(`🎯 **Take Profit:** ${tpValue}% @ $${tpPrice.toFixed(6)} (ID: ${tpOrderResult.orderId})`);
+          const formattedPrice = await this.formatPriceWithPrecision(apiClient, symbol, tpPrice);
+          results.push(`🎯 **Take Profit:** ${tpValue}% @ $${formattedPrice} (ID: ${tpOrderResult.orderId})`);
         } catch (tpError: any) {
           console.error('Take profit order placement failed:', tpError);
           results.push(`❌ **Take Profit Failed:** ${tpError.message || 'Unknown error'}`);
@@ -4792,7 +4826,8 @@ Contact @AsterDEX\\_Support or visit docs.aster.exchange for detailed guides.
         
         try {
           slOrderResult = await apiClient.setStopLoss(symbol, slPrice);
-          results.push(`🛡️ **Stop Loss:** ${slValue}% @ $${slPrice.toFixed(6)} (ID: ${slOrderResult.orderId})`);
+          const formattedPrice = await this.formatPriceWithPrecision(apiClient, symbol, slPrice);
+          results.push(`🛡️ **Stop Loss:** ${slValue}% @ $${formattedPrice} (ID: ${slOrderResult.orderId})`);
         } catch (slError: any) {
           console.error('Stop loss order placement failed:', slError);
           results.push(`❌ **Stop Loss Failed:** ${slError.message || 'Unknown error'}`);

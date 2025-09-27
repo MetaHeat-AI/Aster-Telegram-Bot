@@ -313,15 +313,19 @@ export class AsterApiClient {
     }
 
     const positionAmt = Math.abs(parseFloat(position.positionAmt));
-    const quantity = percentage ? (positionAmt * percentage / 100).toString() : position.positionAmt;
+    const rawQuantity = percentage ? (positionAmt * percentage / 100) : Math.abs(parseFloat(position.positionAmt));
     const side = parseFloat(position.positionAmt) > 0 ? 'SELL' : 'BUY';
+
+    // Format precision using exchange info
+    const formattedQuantity = await this.formatQuantityWithPrecision(symbol, rawQuantity);
+    const formattedPrice = await this.formatPriceWithPrecision(symbol, stopPrice);
 
     const orderParams: Partial<NewOrderRequest> = {
       symbol,
       side: side as any,
       type: 'STOP_MARKET',
-      quantity: Math.abs(parseFloat(quantity)).toString(),
-      stopPrice: stopPrice.toString(),
+      quantity: formattedQuantity,
+      stopPrice: formattedPrice,
       reduceOnly: true
     };
 
@@ -337,15 +341,19 @@ export class AsterApiClient {
     }
 
     const positionAmt = Math.abs(parseFloat(position.positionAmt));
-    const quantity = percentage ? (positionAmt * percentage / 100).toString() : position.positionAmt;
+    const rawQuantity = percentage ? (positionAmt * percentage / 100) : Math.abs(parseFloat(position.positionAmt));
     const side = parseFloat(position.positionAmt) > 0 ? 'SELL' : 'BUY';
+
+    // Format precision using exchange info
+    const formattedQuantity = await this.formatQuantityWithPrecision(symbol, rawQuantity);
+    const formattedPrice = await this.formatPriceWithPrecision(symbol, price);
 
     const orderParams: Partial<NewOrderRequest> = {
       symbol,
       side: side as any,
       type: 'TAKE_PROFIT_MARKET',
-      quantity: Math.abs(parseFloat(quantity)).toString(),
-      stopPrice: price.toString(),
+      quantity: formattedQuantity,
+      stopPrice: formattedPrice,
       reduceOnly: true
     };
 
@@ -617,6 +625,70 @@ export class AsterApiClient {
     } catch (error) {
       console.error('API credentials validation failed:', error);
       return false;
+    }
+  }
+
+  /**
+   * Format quantity to exchange precision requirements
+   * This prevents "Precision is over the maximum defined" errors
+   */
+  private async formatQuantityWithPrecision(symbol: string, rawQuantity: number): Promise<string> {
+    try {
+      const exchangeInfo = await this.getExchangeInfo();
+      const symbolInfo = exchangeInfo.symbols.find((s: any) => s.symbol === symbol);
+      
+      if (symbolInfo) {
+        const lotSizeFilter = symbolInfo.filters.find((f: any) => f.filterType === 'LOT_SIZE');
+        if (lotSizeFilter) {
+          const stepSize = parseFloat(lotSizeFilter.stepSize);
+          const adjustedQuantity = Math.floor(rawQuantity / stepSize) * stepSize;
+          const decimalPlaces = lotSizeFilter.stepSize.split('.')[1]?.length || 0;
+          const formattedQuantity = adjustedQuantity.toFixed(decimalPlaces);
+          
+          console.log(`[PRECISION] ${symbol} - Raw Quantity: ${rawQuantity}, Adjusted: ${formattedQuantity}, StepSize: ${stepSize}`);
+          return formattedQuantity;
+        }
+      }
+      
+      // Fallback to 6 decimal places
+      console.warn(`[PRECISION] No LOT_SIZE filter found for ${symbol}, using default precision`);
+      return rawQuantity.toFixed(6);
+    } catch (error) {
+      console.warn(`[PRECISION] Failed to get quantity precision for ${symbol}, using default:`, error);
+      return rawQuantity.toFixed(6);
+    }
+  }
+
+  /**
+   * Format price to exchange precision requirements for TP/SL orders
+   * This prevents "Precision is over the maximum defined" errors for prices
+   */
+  private async formatPriceWithPrecision(symbol: string, rawPrice: number): Promise<string> {
+    try {
+      const exchangeInfo = await this.getExchangeInfo();
+      const symbolInfo = exchangeInfo.symbols.find((s: any) => s.symbol === symbol);
+      
+      if (symbolInfo) {
+        const priceFilter = symbolInfo.filters.find((f: any) => f.filterType === 'PRICE_FILTER');
+        if (priceFilter) {
+          const tickSize = parseFloat(priceFilter.tickSize);
+          const adjustedPrice = Math.round(rawPrice / tickSize) * tickSize;
+          const decimalPlaces = priceFilter.tickSize.split('.')[1]?.length || 0;
+          const formattedPrice = adjustedPrice.toFixed(decimalPlaces);
+          
+          console.log(`[PRECISION] ${symbol} - Raw Price: ${rawPrice}, Adjusted: ${formattedPrice}, TickSize: ${tickSize}`);
+          return formattedPrice;
+        }
+      }
+      
+      // Fallback: format based on price range
+      const decimalPlaces = rawPrice < 1 ? 6 : rawPrice < 100 ? 4 : 2;
+      console.warn(`[PRECISION] No PRICE_FILTER found for ${symbol}, using fallback precision: ${decimalPlaces}`);
+      return rawPrice.toFixed(decimalPlaces);
+    } catch (error) {
+      console.warn(`[PRECISION] Failed to get price precision for ${symbol}, using fallback:`, error);
+      const decimalPlaces = rawPrice < 1 ? 6 : rawPrice < 100 ? 4 : 2;
+      return rawPrice.toFixed(decimalPlaces);
     }
   }
 
