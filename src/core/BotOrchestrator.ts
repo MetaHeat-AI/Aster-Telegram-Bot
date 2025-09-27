@@ -373,21 +373,21 @@ export class BotOrchestrator {
     // Custom amount handlers
     this.bot.action(/^spot_custom_amount_(buy|sell)_(.+)$/, (ctx) => {
       const [, side, symbol] = ctx.match;
-      this.handlePlaceholderAction(ctx, `💰 Custom ${side} ${symbol} - Feature coming soon!`);
+      this.handleCustomAmount(ctx, 'spot', side.toUpperCase() as 'BUY' | 'SELL', symbol);
     });
 
     this.bot.action(/^perps_custom_amount_(buy|sell)_(.+)$/, (ctx) => {
       const [, side, symbol] = ctx.match;
-      this.handlePlaceholderAction(ctx, `💰 Custom ${side} ${symbol} - Feature coming soon!`);
+      this.handleCustomAmount(ctx, 'perps', side.toUpperCase() as 'BUY' | 'SELL', symbol);
     });
 
     // Trade confirmation/cancellation flow
     this.bot.action('confirm_trade', (ctx) => 
-      this.handlePlaceholderAction(ctx, '✅ Trade confirmation - Feature coming soon!')
+      this.handleTradeConfirmation(ctx)
     );
 
     this.bot.action('cancel_trade', (ctx) => 
-      this.handlePlaceholderAction(ctx, '❌ Trade cancellation - Feature coming soon!')
+      this.handleTradeCancellation(ctx)
     );
 
     // Basic trade actions
@@ -431,7 +431,7 @@ export class BotOrchestrator {
     // Quick trading handlers
     this.bot.action(/^quick_trade_(.+)$/, (ctx) => {
       const symbol = ctx.match[1];
-      this.handlePlaceholderAction(ctx, `⚡ Quick trade ${symbol} - Feature coming soon!`);
+      this.handleQuickTrade(ctx, symbol);
     });
 
     this.bot.action(/^quick_(buy|sell)_(\d+)([up%])_(.+)$/, (ctx) => {
@@ -474,38 +474,38 @@ export class BotOrchestrator {
 
     // Price tracking handlers
     this.bot.action('price_menu', (ctx) => 
-      this.handlePlaceholderAction(ctx, '📊 Price menu - Feature coming soon!')
+      this.handlePriceMenu(ctx)
     );
 
     this.bot.action('price_top_mcap', (ctx) => 
-      this.handlePlaceholderAction(ctx, '📊 Top market cap - Feature coming soon!')
+      this.handleTopMarketCap(ctx)
     );
 
     this.bot.action('price_top_volume', (ctx) => 
-      this.handlePlaceholderAction(ctx, '📊 Top volume - Feature coming soon!')
+      this.handleTopVolume(ctx)
     );
 
     this.bot.action('price_watchlist', (ctx) => 
-      this.handlePlaceholderAction(ctx, '📊 Price watchlist - Feature coming soon!')
+      this.handlePriceWatchlist(ctx)
     );
 
     this.bot.action(/^price_token_([A-Z0-9]+USDT)$/, (ctx) => {
       const symbol = ctx.match[1];
-      this.handlePlaceholderAction(ctx, `📊 ${symbol} price - Feature coming soon!`);
+      this.handleTokenPrice(ctx, symbol);
     });
 
     this.bot.action('price_compare', (ctx) => 
-      this.handlePlaceholderAction(ctx, '📊 Price compare - Feature coming soon!')
+      this.handlePriceCompare(ctx)
     );
 
     this.bot.action('price_all_markets', (ctx) => 
-      this.handlePlaceholderAction(ctx, '📊 All markets - Feature coming soon!')
+      this.handleAllMarkets(ctx)
     );
 
     // Settings handlers
     this.bot.action(/^settings_(.+)$/, (ctx) => {
       const setting = ctx.match[1];
-      this.handlePlaceholderAction(ctx, `⚙️ Setting ${setting} - Feature coming soon!`);
+      this.handleSettingsSubmenu(ctx, setting);
     });
 
     console.log('[Orchestrator] Actions registered');
@@ -522,6 +522,12 @@ export class BotOrchestrator {
       // Check if expecting custom pair input
       if ((ctx.userState as any)?.expectingCustomPair) {
         this.handleCustomPairText(ctx, ctx.message.text);
+        return;
+      }
+      
+      // Check if expecting custom amount input
+      if ((ctx.userState as any)?.expectingCustomAmount) {
+        this.handleCustomAmountText(ctx, ctx.message.text);
         return;
       }
       
@@ -1170,7 +1176,7 @@ If you need help, contact support or check the documentation.
    * Handle price command
    */
   private async handlePriceCommand(ctx: BotContext): Promise<void> {
-    await ctx.reply('📊 **Price Tracking**\n\nPrice tracking features coming soon! Use /trade for current trading prices.');
+    await this.handlePriceMenu(ctx);
   }
 
   /**
@@ -1289,6 +1295,79 @@ If you need help, contact support or check the documentation.
     } catch (error) {
       console.error('Position management menu error:', error);
       await ctx.reply('❌ Failed to load position details. Please try again.');
+    }
+  }
+
+  /**
+   * Handle quick trade for a symbol - provides quick trading options
+   */
+  private async handleQuickTrade(ctx: BotContext, symbol: string): Promise<void> {
+    if (!ctx.userState?.isLinked) {
+      await ctx.reply('❌ Please link your API credentials first using /link');
+      return;
+    }
+
+    try {
+      const apiClient = await this.apiClientService.getOrCreateClient(ctx.userState.userId);
+      
+      // Get current position info
+      const positions = await apiClient.getPositionRisk();
+      const position = positions.find((p: any) => p.symbol === symbol && parseFloat(p.positionAmt) !== 0);
+      
+      // Get current price
+      const currentPrice = await this.priceService.getCurrentPrice(symbol);
+      
+      let quickTradeText = `⚡ **Quick Trade ${symbol}**\n\n`;
+      quickTradeText += `💵 **Current Price:** $${currentPrice.toFixed(6)}\n\n`;
+      
+      if (position) {
+        const positionAmt = parseFloat(position.positionAmt);
+        const side = positionAmt > 0 ? 'LONG' : 'SHORT';
+        const pnl = parseFloat(position.unrealizedPnl) || 0;
+        const pnlEmoji = pnl >= 0 ? '🟢' : '🔴';
+        
+        quickTradeText += `📊 **Current Position:**\n`;
+        quickTradeText += `• Side: ${side}\n`;
+        quickTradeText += `• Size: ${Math.abs(positionAmt)} (${(Math.abs(positionAmt) * parseFloat(position.entryPrice)).toFixed(2)} USDT)\n`;
+        quickTradeText += `• Entry: $${position.entryPrice}\n`;
+        quickTradeText += `• ${pnlEmoji} P&L: $${pnl.toFixed(2)}\n\n`;
+        
+        quickTradeText += `🎯 **Quick Actions:**`;
+      } else {
+        quickTradeText += `📊 **No Current Position**\n\n🎯 **Start Trading:**`;
+      }
+
+      // Create quick trading buttons
+      const keyboard = Markup.inlineKeyboard([
+        [
+          Markup.button.callback('🟢 Long $25', `perps_execute_buy_${symbol}_25u_5x`),
+          Markup.button.callback('🔴 Short $25', `perps_execute_sell_${symbol}_25u_5x`)
+        ],
+        [
+          Markup.button.callback('🟢 Long $50', `perps_execute_buy_${symbol}_50u_5x`),
+          Markup.button.callback('🔴 Short $50', `perps_execute_sell_${symbol}_50u_5x`)
+        ],
+        [
+          Markup.button.callback('🟢 Long $100', `perps_execute_buy_${symbol}_100u_5x`),
+          Markup.button.callback('🔴 Short $100', `perps_execute_sell_${symbol}_100u_5x`)
+        ],
+        position ? [
+          Markup.button.callback('📊 Manage Position', `position_manage_${symbol}`),
+          Markup.button.callback('🔴 Close Position', `position_close_${symbol}`)
+        ] : [
+          Markup.button.callback('🎯 Custom Amount', `perps_custom_amount_buy_${symbol}`),
+          Markup.button.callback('📈 Full Trading', 'trade_perps')
+        ],
+        [
+          Markup.button.callback('🔙 Back to Positions', 'positions')
+        ]
+      ]);
+
+      await ctx.editMessageText(quickTradeText, { parse_mode: 'Markdown', ...keyboard });
+
+    } catch (error) {
+      console.error('Quick trade error:', error);
+      await ctx.reply(`❌ Failed to load quick trade for ${symbol}. Please try again.`);
     }
   }
 
@@ -1486,6 +1565,768 @@ If you need help, contact support or check the documentation.
       console.error('[Orchestrator] Settings menu error:', error);
       await ctx.reply('❌ Failed to load settings. Please try again.');
     }
+  }
+
+  /**
+   * Handle settings submenus
+   */
+  private async handleSettingsSubmenu(ctx: BotContext, setting: string): Promise<void> {
+    if (!ctx.userState?.isLinked) {
+      await ctx.reply('❌ Please link your API credentials first using /link');
+      return;
+    }
+
+    try {
+      const SettingsModule = await import('../settings');
+      const settingsManager = new SettingsModule.SettingsManager(this.db, this.encryption);
+      const userSettings = await settingsManager.getUserSettings(ctx.userState.userId);
+
+      switch (setting) {
+        case 'leverage':
+          await this.handleLeverageSettings(ctx, userSettings, settingsManager);
+          break;
+        case 'size':
+          await this.handleSizeSettings(ctx, userSettings, settingsManager);
+          break;
+        case 'risk':
+          await this.handleRiskSettings(ctx, userSettings, settingsManager);
+          break;
+        case 'security':
+          await this.handleSecuritySettings(ctx, userSettings, settingsManager);
+          break;
+        default:
+          await ctx.reply(`❌ Unknown setting: ${setting}`);
+      }
+    } catch (error) {
+      console.error('Settings submenu error:', error);
+      await ctx.reply('❌ Failed to load settings submenu. Please try again.');
+    }
+  }
+
+  /**
+   * Handle leverage settings
+   */
+  private async handleLeverageSettings(ctx: BotContext, userSettings: any, settingsManager: any): Promise<void> {
+    const leverageText = [
+      '🎯 **Leverage Settings**',
+      '',
+      `**Current Leverage Cap:** ${userSettings.leverage_cap}x`,
+      `**Default Leverage:** ${userSettings.default_leverage}x`,
+      '',
+      '⚙️ **Configure leverage limits for safety:**',
+      '• Leverage Cap: Maximum allowed leverage',
+      '• Default Leverage: Used for quick trades',
+      '',
+      '💡 **Recommended:** Cap at 20x for safer trading'
+    ].join('\n');
+
+    const keyboard = Markup.inlineKeyboard([
+      [
+        Markup.button.callback('5x Cap', 'set_leverage_cap_5'),
+        Markup.button.callback('10x Cap', 'set_leverage_cap_10')
+      ],
+      [
+        Markup.button.callback('20x Cap', 'set_leverage_cap_20'),
+        Markup.button.callback('50x Cap', 'set_leverage_cap_50')
+      ],
+      [
+        Markup.button.callback('2x Default', 'set_default_leverage_2'),
+        Markup.button.callback('5x Default', 'set_default_leverage_5')
+      ],
+      [
+        Markup.button.callback('🔙 Back', 'settings')
+      ]
+    ]);
+
+    await ctx.editMessageText(leverageText, { parse_mode: 'Markdown', ...keyboard });
+  }
+
+  /**
+   * Handle size settings
+   */
+  private async handleSizeSettings(ctx: BotContext, userSettings: any, settingsManager: any): Promise<void> {
+    const sizeText = [
+      '💰 **Size Settings**',
+      '',
+      `**Size Presets:** $${userSettings.size_presets.join(', $')}`,
+      '',
+      '⚙️ **Configure default trade sizes:**',
+      '• Quick access buttons for common amounts',
+      '• Customize based on your trading style',
+      '',
+      '💡 **Popular presets:** $25, $50, $100, $250'
+    ].join('\n');
+
+    const keyboard = Markup.inlineKeyboard([
+      [
+        Markup.button.callback('Conservative', 'set_size_preset_conservative'),
+        Markup.button.callback('Moderate', 'set_size_preset_moderate')
+      ],
+      [
+        Markup.button.callback('Aggressive', 'set_size_preset_aggressive'),
+        Markup.button.callback('Custom', 'set_size_preset_custom')
+      ],
+      [
+        Markup.button.callback('🔙 Back', 'settings')
+      ]
+    ]);
+
+    await ctx.editMessageText(sizeText, { parse_mode: 'Markdown', ...keyboard });
+  }
+
+  /**
+   * Handle risk settings
+   */
+  private async handleRiskSettings(ctx: BotContext, userSettings: any, settingsManager: any): Promise<void> {
+    const riskText = [
+      '🛡️ **Risk Management Settings**',
+      '',
+      `**Slippage Tolerance:** ${(userSettings.slippage_bps / 100).toFixed(2)}%`,
+      `**Daily Loss Cap:** ${userSettings.daily_loss_cap ? '$' + userSettings.daily_loss_cap : 'None'}`,
+      `**TP Presets:** ${userSettings.tp_presets.join('%, ')}%`,
+      `**SL Presets:** ${userSettings.sl_presets.join('%, ')}%`,
+      '',
+      '⚙️ **Configure risk management:**',
+      '• Set maximum daily losses',
+      '• Configure slippage tolerance',
+      '• Set take profit/stop loss presets'
+    ].join('\n');
+
+    const keyboard = Markup.inlineKeyboard([
+      [
+        Markup.button.callback('$100 Daily Cap', 'set_daily_cap_100'),
+        Markup.button.callback('$500 Daily Cap', 'set_daily_cap_500')
+      ],
+      [
+        Markup.button.callback('0.5% Slippage', 'set_slippage_50'),
+        Markup.button.callback('1% Slippage', 'set_slippage_100')
+      ],
+      [
+        Markup.button.callback('Remove Daily Cap', 'remove_daily_cap'),
+        Markup.button.callback('Reset to Default', 'reset_risk_settings')
+      ],
+      [
+        Markup.button.callback('🔙 Back', 'settings')
+      ]
+    ]);
+
+    await ctx.editMessageText(riskText, { parse_mode: 'Markdown', ...keyboard });
+  }
+
+  /**
+   * Handle security settings
+   */
+  private async handleSecuritySettings(ctx: BotContext, userSettings: any, settingsManager: any): Promise<void> {
+    const securityText = [
+      '🔒 **Security Settings**',
+      '',
+      `**PIN Protection:** ${userSettings.pin_hash ? 'Enabled' : 'Disabled'}`,
+      '',
+      '⚙️ **Security features:**',
+      '• PIN protection for trades',
+      '• Secure credential storage',
+      '• Session management',
+      '',
+      '💡 **Enable PIN for extra security on large trades**'
+    ].join('\n');
+
+    const keyboard = Markup.inlineKeyboard([
+      [
+        userSettings.pin_hash ? 
+          Markup.button.callback('🔓 Disable PIN', 'disable_pin') :
+          Markup.button.callback('🔒 Enable PIN', 'enable_pin'),
+        Markup.button.callback('🔄 Change PIN', 'change_pin')
+      ],
+      [
+        Markup.button.callback('🔐 Security Info', 'security_info'),
+        Markup.button.callback('⚠️ Reset Security', 'reset_security')
+      ],
+      [
+        Markup.button.callback('🔙 Back', 'settings')
+      ]
+    ]);
+
+    await ctx.editMessageText(securityText, { parse_mode: 'Markdown', ...keyboard });
+  }
+
+  /**
+   * Handle price menu - main price tracking interface
+   */
+  private async handlePriceMenu(ctx: BotContext): Promise<void> {
+    try {
+      const priceText = [
+        '📊 **Price Tracking Center**',
+        '',
+        '🎯 **Quick Access:**',
+        '• View top cryptocurrencies by market cap',
+        '• Check highest volume trading pairs',
+        '• Compare multiple token prices',
+        '• Track your watchlist assets',
+        '• View all available markets',
+        '',
+        '💡 Select an option below to get started:'
+      ].join('\n');
+
+      const keyboard = Markup.inlineKeyboard([
+        [
+          Markup.button.callback('🏆 Top Market Cap', 'price_top_mcap'),
+          Markup.button.callback('📈 Top Volume', 'price_top_volume')
+        ],
+        [
+          Markup.button.callback('⭐ Watchlist', 'price_watchlist'),
+          Markup.button.callback('🔄 Compare Prices', 'price_compare')
+        ],
+        [
+          Markup.button.callback('🌐 All Markets', 'price_all_markets'),
+          Markup.button.callback('📈 Trade', 'unified_trade')
+        ],
+        [
+          Markup.button.callback('🔙 Back', 'main_menu')
+        ]
+      ]);
+
+      await ctx.editMessageText(priceText, { parse_mode: 'Markdown', ...keyboard });
+    } catch (error) {
+      console.error('Price menu error:', error);
+      await ctx.reply('❌ Failed to load price menu. Please try again.');
+    }
+  }
+
+  /**
+   * Handle top market cap display
+   */
+  private async handleTopMarketCap(ctx: BotContext): Promise<void> {
+    try {
+      // Get top symbols by volume as a proxy for market cap
+      const topSymbols = ['BTCUSDT', 'ETHUSDT', 'BNBUSDT', 'ADAUSDT', 'XRPUSDT', 'SOLUSDT', 'DOTUSDT', 'LINKUSDT'];
+      
+      let priceText = '🏆 **Top Market Cap Cryptocurrencies**\n\n';
+      
+      const pricePromises = topSymbols.map(async (symbol, index) => {
+        try {
+          const price = await this.priceService.getCurrentPrice(symbol);
+          // Use public API client for price data
+          const AsterApiClient = await import('../aster');
+          const publicClient = new AsterApiClient.AsterApiClient('https://api.aster.exchange', '', '');
+          const ticker = await publicClient.get24hrTicker(symbol);
+          const change24h = parseFloat(ticker.priceChangePercent);
+          const changeEmoji = change24h >= 0 ? '🟢' : '🔴';
+          const changeText = change24h >= 0 ? '+' : '';
+          
+          return `${index + 1}. **${symbol.replace('USDT', '')}** • $${price.toFixed(6)}\n   ${changeEmoji} ${changeText}${change24h.toFixed(2)}% (24h)\n`;
+        } catch (error) {
+          return `${index + 1}. **${symbol.replace('USDT', '')}** • Price unavailable\n`;
+        }
+      });
+      
+      const priceResults = await Promise.all(pricePromises);
+      priceText += priceResults.join('\n');
+      
+      const keyboard = Markup.inlineKeyboard([
+        [
+          Markup.button.callback('📈 Top Volume', 'price_top_volume'),
+          Markup.button.callback('🔄 Refresh', 'price_top_mcap')
+        ],
+        [
+          Markup.button.callback('📈 Trade', 'unified_trade'),
+          Markup.button.callback('🔙 Back', 'price_menu')
+        ]
+      ]);
+
+      await ctx.editMessageText(priceText, { parse_mode: 'Markdown', ...keyboard });
+    } catch (error) {
+      console.error('Top market cap error:', error);
+      await ctx.reply('❌ Failed to load top market cap data. Please try again.');
+    }
+  }
+
+  /**
+   * Handle top volume display
+   */
+  private async handleTopVolume(ctx: BotContext): Promise<void> {
+    try {
+      // Use public API client for market data
+      const AsterApiClient = await import('../aster');
+      const apiClient = new AsterApiClient.AsterApiClient('https://api.aster.exchange', '', '');
+      const allTickers = await apiClient.getAllFuturesTickers();
+      
+      // Sort by volume and take top 8
+      const topByVolume = allTickers
+        .filter((ticker: any) => ticker.symbol.endsWith('USDT'))
+        .sort((a: any, b: any) => parseFloat(b.volume) - parseFloat(a.volume))
+        .slice(0, 8);
+      
+      let volumeText = '📈 **Highest Volume Trading Pairs**\n\n';
+      
+      topByVolume.forEach((ticker: any, index: number) => {
+        const change24h = parseFloat(ticker.priceChangePercent);
+        const changeEmoji = change24h >= 0 ? '🟢' : '🔴';
+        const changeText = change24h >= 0 ? '+' : '';
+        const volume = (parseFloat(ticker.volume) / 1000000).toFixed(1); // Convert to millions
+        
+        volumeText += `${index + 1}. **${ticker.symbol.replace('USDT', '')}** • $${parseFloat(ticker.lastPrice).toFixed(6)}\n`;
+        volumeText += `   ${changeEmoji} ${changeText}${change24h.toFixed(2)}% • Vol: ${volume}M USDT\n\n`;
+      });
+      
+      const keyboard = Markup.inlineKeyboard([
+        [
+          Markup.button.callback('🏆 Top Market Cap', 'price_top_mcap'),
+          Markup.button.callback('🔄 Refresh', 'price_top_volume')
+        ],
+        [
+          Markup.button.callback('📈 Trade', 'unified_trade'),
+          Markup.button.callback('🔙 Back', 'price_menu')
+        ]
+      ]);
+
+      await ctx.editMessageText(volumeText, { parse_mode: 'Markdown', ...keyboard });
+    } catch (error) {
+      console.error('Top volume error:', error);
+      await ctx.reply('❌ Failed to load top volume data. Please try again.');
+    }
+  }
+
+  /**
+   * Handle price watchlist
+   */
+  private async handlePriceWatchlist(ctx: BotContext): Promise<void> {
+    try {
+      // Default watchlist symbols
+      const watchlist = ['BTCUSDT', 'ETHUSDT', 'BNBUSDT', 'ADAUSDT', 'XRPUSDT', 'ASTERUSDT'];
+      
+      let watchlistText = '⭐ **Price Watchlist**\n\n';
+      
+      const pricePromises = watchlist.map(async (symbol) => {
+        try {
+          const price = await this.priceService.getCurrentPrice(symbol);
+          // Use public API client for price data
+          const AsterApiClient = await import('../aster');
+          const publicClient = new AsterApiClient.AsterApiClient('https://api.aster.exchange', '', '');
+          const ticker = await publicClient.get24hrTicker(symbol);
+          const change24h = parseFloat(ticker.priceChangePercent);
+          const changeEmoji = change24h >= 0 ? '🟢' : '🔴';
+          const changeText = change24h >= 0 ? '+' : '';
+          
+          return [
+            `**${symbol.replace('USDT', '')}** • $${price.toFixed(6)}`,
+            `${changeEmoji} ${changeText}${change24h.toFixed(2)}% (24h)`,
+            ''
+          ].join('\n');
+        } catch (error) {
+          return `**${symbol.replace('USDT', '')}** • Price unavailable\n\n`;
+        }
+      });
+      
+      const watchlistResults = await Promise.all(pricePromises);
+      watchlistText += watchlistResults.join('');
+      
+      // Create price buttons for quick access
+      const priceButtons = watchlist.map(symbol => 
+        Markup.button.callback(symbol.replace('USDT', ''), `price_token_${symbol}`)
+      );
+      
+      // Arrange in rows of 3
+      const buttonRows = [];
+      for (let i = 0; i < priceButtons.length; i += 3) {
+        buttonRows.push(priceButtons.slice(i, i + 3));
+      }
+      
+      buttonRows.push([
+        Markup.button.callback('🔄 Refresh', 'price_watchlist'),
+        Markup.button.callback('📈 Trade', 'unified_trade')
+      ]);
+      
+      buttonRows.push([
+        Markup.button.callback('🔙 Back', 'price_menu')
+      ]);
+      
+      const keyboard = Markup.inlineKeyboard(buttonRows);
+
+      await ctx.editMessageText(watchlistText, { parse_mode: 'Markdown', ...keyboard });
+    } catch (error) {
+      console.error('Price watchlist error:', error);
+      await ctx.reply('❌ Failed to load price watchlist. Please try again.');
+    }
+  }
+
+  /**
+   * Handle individual token price
+   */
+  private async handleTokenPrice(ctx: BotContext, symbol: string): Promise<void> {
+    try {
+      // Use public API client for market data
+      const AsterApiClient = await import('../aster');
+      const apiClient = new AsterApiClient.AsterApiClient('https://api.aster.exchange', '', '');
+      const [currentPrice, ticker] = await Promise.all([
+        this.priceService.getCurrentPrice(symbol),
+        apiClient.get24hrTicker(symbol)
+      ]);
+      
+      const change24h = parseFloat(ticker.priceChangePercent);
+      const changeEmoji = change24h >= 0 ? '🟢' : '🔴';
+      const changeText = change24h >= 0 ? '+' : '';
+      const volume = (parseFloat(ticker.volume) / 1000000).toFixed(1);
+      
+      const priceText = [
+        `📊 **${symbol.replace('USDT', '')} Price Details**`,
+        '',
+        `💵 **Current Price:** $${currentPrice.toFixed(6)}`,
+        `${changeEmoji} **24h Change:** ${changeText}${change24h.toFixed(2)}%`,
+        `📈 **24h High:** $${parseFloat(ticker.highPrice).toFixed(6)}`,
+        `📉 **24h Low:** $${parseFloat(ticker.lowPrice).toFixed(6)}`,
+        `📊 **24h Volume:** ${volume}M USDT`,
+        `⏰ **Last Updated:** ${new Date().toLocaleTimeString()}`,
+        '',
+        '🎯 **Quick Actions:**'
+      ].join('\n');
+      
+      const keyboard = Markup.inlineKeyboard([
+        [
+          Markup.button.callback('🟢 Buy', `perps_buy_${symbol}`),
+          Markup.button.callback('🔴 Sell', `perps_sell_${symbol}`)
+        ],
+        [
+          Markup.button.callback('🔄 Refresh Price', `price_token_${symbol}`),
+          Markup.button.callback('📈 Full Trading', 'trade_perps')
+        ],
+        [
+          Markup.button.callback('⭐ Watchlist', 'price_watchlist'),
+          Markup.button.callback('🔙 Back', 'price_menu')
+        ]
+      ]);
+
+      await ctx.editMessageText(priceText, { parse_mode: 'Markdown', ...keyboard });
+    } catch (error) {
+      console.error(`Token price error for ${symbol}:`, error);
+      await ctx.reply(`❌ Failed to load price data for ${symbol}. Please try again.`);
+    }
+  }
+
+  /**
+   * Handle price comparison
+   */
+  private async handlePriceCompare(ctx: BotContext): Promise<void> {
+    try {
+      const compareSymbols = ['BTCUSDT', 'ETHUSDT', 'BNBUSDT', 'ADAUSDT'];
+      
+      let compareText = '🔄 **Price Comparison**\n\n';
+      
+      const comparisonPromises = compareSymbols.map(async (symbol) => {
+        try {
+          const [price, ticker] = await Promise.all([
+            this.priceService.getCurrentPrice(symbol),
+            (async () => {
+              const AsterApiClient = await import('../aster');
+              const publicClient = new AsterApiClient.AsterApiClient('https://api.aster.exchange', '', '');
+              return publicClient.get24hrTicker(symbol);
+            })()
+          ]);
+          
+          const change24h = parseFloat(ticker.priceChangePercent);
+          const changeEmoji = change24h >= 0 ? '🟢' : '🔴';
+          const changeText = change24h >= 0 ? '+' : '';
+          
+          return {
+            symbol,
+            price,
+            change24h,
+            changeEmoji,
+            changeText,
+            text: `**${symbol.replace('USDT', '')}**\n$${price.toFixed(6)} ${changeEmoji} ${changeText}${change24h.toFixed(2)}%`
+          };
+        } catch (error) {
+          return {
+            symbol,
+            price: 0,
+            change24h: 0,
+            changeEmoji: '⚪',
+            changeText: '',
+            text: `**${symbol.replace('USDT', '')}**\nPrice unavailable`
+          };
+        }
+      });
+      
+      const comparisons = await Promise.all(comparisonPromises);
+      
+      // Sort by 24h change (best performers first)
+      comparisons.sort((a, b) => b.change24h - a.change24h);
+      
+      comparisons.forEach((comp, index) => {
+        const rank = index === 0 ? '🥇' : index === 1 ? '🥈' : index === 2 ? '🥉' : '📊';
+        compareText += `${rank} ${comp.text}\n\n`;
+      });
+      
+      const keyboard = Markup.inlineKeyboard([
+        [
+          Markup.button.callback('🔄 Refresh', 'price_compare'),
+          Markup.button.callback('⭐ Watchlist', 'price_watchlist')
+        ],
+        [
+          Markup.button.callback('📈 Trade Best', 'unified_trade'),
+          Markup.button.callback('🔙 Back', 'price_menu')
+        ]
+      ]);
+
+      await ctx.editMessageText(compareText, { parse_mode: 'Markdown', ...keyboard });
+    } catch (error) {
+      console.error('Price comparison error:', error);
+      await ctx.reply('❌ Failed to load price comparison. Please try again.');
+    }
+  }
+
+  /**
+   * Handle all markets display
+   */
+  private async handleAllMarkets(ctx: BotContext): Promise<void> {
+    try {
+      // Use public API client for market data
+      const AsterApiClient = await import('../aster');
+      const apiClient = new AsterApiClient.AsterApiClient('https://api.aster.exchange', '', '');
+      const allTickers = await apiClient.getAllFuturesTickers();
+      
+      // Filter USDT pairs and sort by volume
+      const usdtPairs = allTickers
+        .filter((ticker: any) => ticker.symbol.endsWith('USDT'))
+        .sort((a: any, b: any) => parseFloat(b.volume) - parseFloat(a.volume))
+        .slice(0, 12); // Show top 12
+      
+      let marketsText = '🌐 **All Available Markets**\n\n';
+      marketsText += `📊 **Total USDT Pairs:** ${usdtPairs.length}\n\n`;
+      marketsText += '**🔥 Top Markets by Volume:**\n\n';
+      
+      usdtPairs.forEach((ticker: any, index: number) => {
+        const change24h = parseFloat(ticker.priceChangePercent);
+        const changeEmoji = change24h >= 0 ? '🟢' : '🔴';
+        const changeText = change24h >= 0 ? '+' : '';
+        
+        marketsText += `${index + 1}. **${ticker.symbol.replace('USDT', '')}** $${parseFloat(ticker.lastPrice).toFixed(6)} ${changeEmoji} ${changeText}${change24h.toFixed(1)}%\n`;
+      });
+      
+      const keyboard = Markup.inlineKeyboard([
+        [
+          Markup.button.callback('🔄 Refresh', 'price_all_markets'),
+          Markup.button.callback('📈 Trade', 'unified_trade')
+        ],
+        [
+          Markup.button.callback('🏆 Top Cap', 'price_top_mcap'),
+          Markup.button.callback('📈 Top Vol', 'price_top_volume')
+        ],
+        [
+          Markup.button.callback('🔙 Back', 'price_menu')
+        ]
+      ]);
+
+      await ctx.editMessageText(marketsText, { parse_mode: 'Markdown', ...keyboard });
+    } catch (error) {
+      console.error('All markets error:', error);
+      await ctx.reply('❌ Failed to load market data. Please try again.');
+    }
+  }
+
+  /**
+   * Handle custom amount input for trading
+   */
+  private async handleCustomAmount(ctx: BotContext, mode: 'spot' | 'perps', side: 'BUY' | 'SELL', symbol: string): Promise<void> {
+    if (!ctx.userState?.isLinked) {
+      await ctx.reply('❌ Please link your API credentials first using /link');
+      return;
+    }
+
+    try {
+      const modeText = mode === 'spot' ? 'Spot' : 'Perps';
+      const sideText = side === 'BUY' ? 'Buy' : 'Sell';
+      const currentPrice = await this.priceService.getCurrentPrice(symbol);
+      
+      const customText = [
+        `💰 **Custom ${modeText} ${sideText}**`,
+        `**Symbol:** ${symbol}`,
+        `**Current Price:** $${currentPrice.toFixed(6)}`,
+        '',
+        '✍️ **Type your custom amount:**',
+        '',
+        '📝 **Supported formats:**',
+        '• $100 (USD amount)',
+        '• 100u (USDT amount)',
+        '• 0.1 (token quantity)',
+        mode === 'perps' ? '• 100u 10x (with leverage)' : '',
+        '',
+        '⏳ **Waiting for your input...**'
+      ].filter(Boolean).join('\n');
+
+      const keyboard = Markup.inlineKeyboard([
+        [
+          Markup.button.callback('$25', mode === 'spot' ? `spot_execute_${side.toLowerCase()}_${symbol}_25u` : `perps_execute_${side.toLowerCase()}_${symbol}_25u_5x`),
+          Markup.button.callback('$50', mode === 'spot' ? `spot_execute_${side.toLowerCase()}_${symbol}_50u` : `perps_execute_${side.toLowerCase()}_${symbol}_50u_5x`)
+        ],
+        [
+          Markup.button.callback('$100', mode === 'spot' ? `spot_execute_${side.toLowerCase()}_${symbol}_100u` : `perps_execute_${side.toLowerCase()}_${symbol}_100u_5x`),
+          Markup.button.callback('$250', mode === 'spot' ? `spot_execute_${side.toLowerCase()}_${symbol}_250u` : `perps_execute_${side.toLowerCase()}_${symbol}_250u_5x`)
+        ],
+        [
+          Markup.button.callback('🔙 Back', mode === 'spot' ? `spot_${side.toLowerCase()}_${symbol}` : `perps_${side.toLowerCase()}_${symbol}`)
+        ]
+      ]);
+
+      await ctx.editMessageText(customText, { parse_mode: 'Markdown', ...keyboard });
+
+      // Set conversation state
+      if (ctx.userState) {
+        (ctx.userState as any).expectingCustomAmount = { mode, side, symbol };
+      }
+
+    } catch (error) {
+      console.error('Custom amount error:', error);
+      await ctx.reply(`❌ Failed to load custom amount for ${symbol}. Please try again.`);
+    }
+  }
+
+  /**
+   * Handle custom amount text input
+   */
+  private async handleCustomAmountText(ctx: BotContext, text: string): Promise<void> {
+    const customAmountState = (ctx.userState as any)?.expectingCustomAmount;
+    if (!customAmountState) return;
+
+    // Clear conversation state
+    delete (ctx.userState as any).expectingCustomAmount;
+
+    const { mode, side, symbol } = customAmountState;
+
+    try {
+      // Parse the input
+      const parsed = this.parseAmountInput(text);
+      
+      if (!parsed.isValid) {
+        await ctx.reply(
+          `❌ **Invalid Amount Format**\n\n` +
+          `**Input:** ${text}\n` +
+          `**Error:** ${parsed.error}\n\n` +
+          `📝 **Valid formats:**\n` +
+          `• $100 or 100u (USDT amount)\n` +
+          `• 0.1 (token quantity)\n` +
+          `• 100u 10x (USDT with leverage)\n\n` +
+          `🔄 Use the trading menu to try again.`,
+          { parse_mode: 'Markdown' }
+        );
+        return;
+      }
+
+      // Execute the trade based on parsed input
+      if (mode === 'spot') {
+        if (parsed.usdtAmount) {
+          await this.handleSpotExecuteAction(ctx, symbol, side, parsed.usdtAmount);
+        } else {
+          await ctx.reply('❌ Spot trading requires USDT amount. Use formats like $100 or 100u.');
+        }
+      } else {
+        if (parsed.usdtAmount && parsed.leverage) {
+          await this.handlePerpsExecuteAction(ctx, symbol, side, parsed.usdtAmount, parsed.leverage);
+        } else {
+          await ctx.reply('❌ Perps trading requires USDT amount and leverage. Use format like 100u 5x.');
+        }
+      }
+
+    } catch (error) {
+      console.error('Custom amount parsing error:', error);
+      await ctx.reply(`❌ Failed to process custom amount. Please try again with the trading menu.`);
+    }
+  }
+
+  /**
+   * Parse amount input in various formats
+   */
+  private parseAmountInput(input: string): { isValid: boolean; error?: string; usdtAmount?: number; tokenAmount?: number; leverage?: number } {
+    const trimmed = input.trim().toLowerCase();
+    
+    // Pattern 1: $100 or 100u (USDT amount)
+    const usdtMatch = trimmed.match(/^[\$]?(\d+(?:\.\d+)?)u?$/);
+    if (usdtMatch) {
+      const amount = parseFloat(usdtMatch[1]);
+      if (amount > 0 && amount <= 10000) {
+        return { isValid: true, usdtAmount: amount, leverage: 5 }; // Default 5x leverage
+      }
+    }
+
+    // Pattern 2: 100u 5x (USDT with leverage)
+    const leverageMatch = trimmed.match(/^(\d+(?:\.\d+)?)u?\s+(\d+)x$/);
+    if (leverageMatch) {
+      const amount = parseFloat(leverageMatch[1]);
+      const leverage = parseInt(leverageMatch[2]);
+      if (amount > 0 && amount <= 10000 && leverage >= 1 && leverage <= 125) {
+        return { isValid: true, usdtAmount: amount, leverage };
+      }
+    }
+
+    // Pattern 3: 0.1 (token quantity)
+    const tokenMatch = trimmed.match(/^(\d+(?:\.\d+)?)$/);
+    if (tokenMatch) {
+      const amount = parseFloat(tokenMatch[1]);
+      if (amount > 0) {
+        return { isValid: true, tokenAmount: amount };
+      }
+    }
+
+    return { 
+      isValid: false, 
+      error: 'Invalid format. Use $100, 100u, 0.1, or 100u 5x' 
+    };
+  }
+
+  /**
+   * Handle trade confirmation
+   */
+  private async handleTradeConfirmation(ctx: BotContext): Promise<void> {
+    const pendingTrade = (ctx.userState as any)?.pendingTrade;
+    if (!pendingTrade) {
+      await ctx.reply('❌ No pending trade to confirm.');
+      return;
+    }
+
+    try {
+      // Execute the confirmed trade
+      const { mode, side, symbol, amount, leverage } = pendingTrade;
+      
+      // Clear pending trade
+      delete (ctx.userState as any).pendingTrade;
+
+      if (mode === 'spot') {
+        await this.handleSpotExecuteAction(ctx, symbol, side, amount);
+      } else {
+        await this.handlePerpsExecuteAction(ctx, symbol, side, amount, leverage);
+      }
+
+    } catch (error) {
+      console.error('Trade confirmation error:', error);
+      await ctx.reply('❌ Failed to confirm trade. Please try again.');
+    }
+  }
+
+  /**
+   * Handle trade cancellation
+   */
+  private async handleTradeCancellation(ctx: BotContext): Promise<void> {
+    const pendingTrade = (ctx.userState as any)?.pendingTrade;
+    if (!pendingTrade) {
+      await ctx.reply('❌ No pending trade to cancel.');
+      return;
+    }
+
+    // Clear pending trade
+    delete (ctx.userState as any).pendingTrade;
+
+    const { mode, symbol } = pendingTrade;
+    
+    await ctx.editMessageText(
+      '❌ **Trade Cancelled**\n\n' +
+      'Your pending trade has been cancelled.\n\n' +
+      '🔄 Use the trading menu to place a new trade.',
+      { 
+        parse_mode: 'Markdown',
+        ...Markup.inlineKeyboard([
+          [Markup.button.callback('📈 Trade Again', mode === 'spot' ? 'trade_spot' : 'trade_perps')]
+        ])
+      }
+    );
   }
 
   /**
