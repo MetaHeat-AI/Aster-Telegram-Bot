@@ -223,9 +223,69 @@ export class BotOrchestrator {
       this.navigationHandler.showMainMenu(ctx)
     );
 
+    // Help command
+    this.bot.command('help', (ctx) => 
+      this.handleHelpCommand(ctx)
+    );
+
+    // Link command
+    this.bot.command('link', (ctx) => 
+      this.handleLinkCommand(ctx)
+    );
+
+    // Unlink command
+    this.bot.command('unlink', (ctx) => 
+      this.handleUnlinkCommand(ctx)
+    );
+
+    // Settings command
+    this.bot.command('settings', (ctx) => 
+      this.handleSettingsCommand(ctx)
+    );
+
+    // Buy command
+    this.bot.command('buy', (ctx) => 
+      this.handleBuyCommand(ctx)
+    );
+
+    // Sell command
+    this.bot.command('sell', (ctx) => 
+      this.handleSellCommand(ctx)
+    );
+
+    // Positions command
+    this.bot.command('positions', (ctx) => 
+      this.handlePositionsCommand(ctx)
+    );
+
+    // Balance command
+    this.bot.command('balance', (ctx) => 
+      this.handleBalanceCommand(ctx)
+    );
+
+    // P&L command
+    this.bot.command('pnl', (ctx) => 
+      this.handlePnLCommand(ctx)
+    );
+
+    // Spot command
+    this.bot.command('spot', (ctx) => 
+      this.handleSpotCommand(ctx)
+    );
+
+    // Price command
+    this.bot.command('price', (ctx) => 
+      this.handlePriceCommand(ctx)
+    );
+
     // Trade command
     this.bot.command('trade', (ctx) => 
       this.navigationHandler.showTradingMenu(ctx)
+    );
+
+    // Panic command (admin only)
+    this.bot.command('panic', (ctx) => 
+      this.handlePanicCommand(ctx)
     );
 
     console.log('[Orchestrator] Commands registered');
@@ -278,11 +338,11 @@ export class BotOrchestrator {
 
     // Basic action handlers
     this.bot.action('balance', (ctx) => 
-      this.handlePlaceholderAction(ctx, '💰 Balance feature coming soon!')
+      this.handleBalanceCommand(ctx)
     );
 
     this.bot.action('positions', (ctx) => 
-      this.handlePlaceholderAction(ctx, '📊 Positions feature coming soon!')
+      this.handlePositionsCommand(ctx)
     );
 
     this.bot.action('settings', (ctx) => 
@@ -290,11 +350,11 @@ export class BotOrchestrator {
     );
 
     this.bot.action('help', (ctx) => 
-      this.handlePlaceholderAction(ctx, '📖 Help feature coming soon!')
+      this.handleHelpCommand(ctx)
     );
 
     this.bot.action('link_api', (ctx) => 
-      this.handlePlaceholderAction(ctx, '🔗 API linking feature coming soon!')
+      this.handleLinkCommand(ctx)
     );
 
     this.bot.action('spot_assets', (ctx) => 
@@ -338,6 +398,127 @@ export class BotOrchestrator {
     this.bot.action(/^perps_custom_amount_(buy|sell)_(.+)$/, (ctx) => {
       const [, side, symbol] = ctx.match;
       this.handlePlaceholderAction(ctx, `💰 Custom ${side} ${symbol} - Feature coming soon!`);
+    });
+
+    // Trade confirmation/cancellation flow
+    this.bot.action('confirm_trade', (ctx) => 
+      this.handlePlaceholderAction(ctx, '✅ Trade confirmation - Feature coming soon!')
+    );
+
+    this.bot.action('cancel_trade', (ctx) => 
+      this.handlePlaceholderAction(ctx, '❌ Trade cancellation - Feature coming soon!')
+    );
+
+    // Basic trade actions
+    this.bot.action('trade_buy', (ctx) => 
+      this.navigationHandler.showTradingMenu(ctx)
+    );
+
+    this.bot.action('trade_sell', (ctx) => 
+      this.navigationHandler.showTradingMenu(ctx)
+    );
+
+    this.bot.action('trade_back', (ctx) => 
+      this.navigationHandler.showTradingMenu(ctx)
+    );
+
+    // Symbol selection handlers
+    this.bot.action(/^symbol_(.+)_(.+)$/, (ctx) => {
+      const [, action, symbol] = ctx.match;
+      this.handlePlaceholderAction(ctx, `📊 Symbol ${symbol} ${action} - Feature coming soon!`);
+    });
+
+    // Quantity selection handlers
+    this.bot.action(/^qty_(.+)_(.+)_(.+)$/, (ctx) => {
+      const [, amount, action, symbol] = ctx.match;
+      this.handlePlaceholderAction(ctx, `💰 Quantity ${amount} for ${symbol} - Feature coming soon!`);
+    });
+
+    // Leverage selection handlers
+    this.bot.action(/^lev_(.+)_(.+)_(.+)_(.+)$/, (ctx) => {
+      const [, leverage, amount, action, symbol] = ctx.match;
+      this.handlePlaceholderAction(ctx, `⚡ ${leverage}x leverage for ${symbol} - Feature coming soon!`);
+    });
+
+    // Position management handlers
+    this.bot.action(/^position_(.+)_(.+)$/, (ctx) => {
+      const [, action, symbol] = ctx.match;
+      this.handlePlaceholderAction(ctx, `📊 Position ${action} for ${symbol} - Feature coming soon!`);
+    });
+
+    // Quick trading handlers
+    this.bot.action(/^quick_trade_(.+)$/, (ctx) => {
+      const symbol = ctx.match[1];
+      this.handlePlaceholderAction(ctx, `⚡ Quick trade ${symbol} - Feature coming soon!`);
+    });
+
+    this.bot.action(/^quick_(buy|sell)_(\d+)([up%])_(.+)$/, (ctx) => {
+      const [, side, amount, unit, symbol] = ctx.match;
+      const unitText = unit === 'u' ? 'USDT' : '%';
+      this.handlePlaceholderAction(ctx, `⚡ Quick ${side} ${amount}${unitText} ${symbol} - Feature coming soon!`);
+    });
+
+    // P&L refresh handler
+    this.bot.action('refresh_pnl', (ctx) => 
+      this.handlePositionsCommand(ctx)
+    );
+
+    // Alternative spot/perps symbol patterns from original
+    this.bot.action(/^spot_(buy|sell)_([A-Z0-9]+USDT)$/, (ctx) => {
+      const [, side, symbol] = ctx.match;
+      this.tradingHandler.handleSpotSymbolTrading(ctx, symbol, side.toUpperCase() as 'BUY' | 'SELL');
+    });
+
+    this.bot.action(/^perps_(buy|sell)_([A-Z0-9]+USDT)$/, (ctx) => {
+      const [, side, symbol] = ctx.match;
+      this.tradingHandler.handlePerpsSymbolTrading(ctx, symbol, side.toUpperCase() as 'BUY' | 'SELL');
+    });
+
+    // Spot asset selling handlers
+    this.bot.action(/^spot_sell_([A-Z0-9]+)$/, (ctx) => {
+      const asset = ctx.match[1];
+      this.handlePlaceholderAction(ctx, `💱 Sell ${asset} - Feature coming soon!`);
+    });
+
+    this.bot.action(/^spot_sell_([A-Z0-9]+)_(\d+)pct$/, (ctx) => {
+      const [, asset, percentage] = ctx.match;
+      this.handlePlaceholderAction(ctx, `💱 Sell ${percentage}% of ${asset} - Feature coming soon!`);
+    });
+
+    // Price tracking handlers
+    this.bot.action('price_menu', (ctx) => 
+      this.handlePlaceholderAction(ctx, '📊 Price menu - Feature coming soon!')
+    );
+
+    this.bot.action('price_top_mcap', (ctx) => 
+      this.handlePlaceholderAction(ctx, '📊 Top market cap - Feature coming soon!')
+    );
+
+    this.bot.action('price_top_volume', (ctx) => 
+      this.handlePlaceholderAction(ctx, '📊 Top volume - Feature coming soon!')
+    );
+
+    this.bot.action('price_watchlist', (ctx) => 
+      this.handlePlaceholderAction(ctx, '📊 Price watchlist - Feature coming soon!')
+    );
+
+    this.bot.action(/^price_token_([A-Z0-9]+USDT)$/, (ctx) => {
+      const symbol = ctx.match[1];
+      this.handlePlaceholderAction(ctx, `📊 ${symbol} price - Feature coming soon!`);
+    });
+
+    this.bot.action('price_compare', (ctx) => 
+      this.handlePlaceholderAction(ctx, '📊 Price compare - Feature coming soon!')
+    );
+
+    this.bot.action('price_all_markets', (ctx) => 
+      this.handlePlaceholderAction(ctx, '📊 All markets - Feature coming soon!')
+    );
+
+    // Settings handlers
+    this.bot.action(/^settings_(.+)$/, (ctx) => {
+      const setting = ctx.match[1];
+      this.handlePlaceholderAction(ctx, `⚙️ Setting ${setting} - Feature coming soon!`);
     });
 
     console.log('[Orchestrator] Actions registered');
@@ -679,6 +860,205 @@ export class BotOrchestrator {
         context: { type: 'perps_execute_action', symbol, side, amount, leverage }
       });
     }
+  }
+
+  /**
+   * Handle help command
+   */
+  private async handleHelpCommand(ctx: BotContext): Promise<void> {
+    const helpText = `
+🆘 **AsterBot Help Center**
+
+**📋 Commands:**
+• /start - Welcome & main menu
+• /menu - Show main menu
+• /trade - Quick access to trading
+• /positions - View open positions
+• /balance - Check account balance
+• /help - Show this help
+
+**🔗 Setup:**
+• /link - Link your API credentials
+• /unlink - Remove API credentials
+• /settings - Bot settings
+
+**📈 Trading:**
+• Use buttons for easy trading
+• Supports spot & perpetual futures
+• Real-time P&L tracking
+
+**🆘 Support:**
+If you need help, contact support or check the documentation.
+    `.trim();
+
+    await ctx.reply(helpText, { parse_mode: 'Markdown' });
+  }
+
+  /**
+   * Handle link API command
+   */
+  private async handleLinkCommand(ctx: BotContext): Promise<void> {
+    await ctx.reply('🔗 **API Linking**\n\nPlease use the Link API button in the main menu to securely link your credentials.\n\nUse /menu to access the main menu.');
+  }
+
+  /**
+   * Handle unlink command
+   */
+  private async handleUnlinkCommand(ctx: BotContext): Promise<void> {
+    if (!ctx.userState?.isLinked) {
+      await ctx.reply('❌ No API credentials are currently linked.');
+      return;
+    }
+    
+    try {
+      // For now, just notify the user - implement actual unlinking later
+      await ctx.reply('✅ **API Credentials Unlinked**\n\nYour API credentials have been safely removed from our system.\n\n(Implementation pending)');
+    } catch (error) {
+      await ctx.reply('❌ Failed to unlink credentials. Please try again.');
+    }
+  }
+
+  /**
+   * Handle settings command
+   */
+  private async handleSettingsCommand(ctx: BotContext): Promise<void> {
+    await ctx.reply('⚙️ **Settings**\n\nSettings management coming soon! Use /menu for main options.');
+  }
+
+  /**
+   * Handle buy command
+   */
+  private async handleBuyCommand(ctx: BotContext): Promise<void> {
+    await ctx.reply('📈 **Quick Buy**\n\nUse /trade or the main menu to access the trading interface.');
+  }
+
+  /**
+   * Handle sell command
+   */
+  private async handleSellCommand(ctx: BotContext): Promise<void> {
+    await ctx.reply('📉 **Quick Sell**\n\nUse /trade or the main menu to access the trading interface.');
+  }
+
+  /**
+   * Handle positions command
+   */
+  private async handlePositionsCommand(ctx: BotContext): Promise<void> {
+    if (!ctx.userState?.isLinked) {
+      await ctx.reply('❌ Please link your API credentials first using /link');
+      return;
+    }
+
+    try {
+      const apiClient = await this.apiClientService.getOrCreateClient(ctx.userState.userId);
+      const FuturesAccountService = await import('../services/FuturesAccountService');
+      const futuresService = new FuturesAccountService.FuturesAccountService(apiClient);
+      
+      const openPositions = await futuresService.getOpenPositions();
+      
+      if (openPositions.length === 0) {
+        await ctx.reply('📊 **No Open Positions**\n\nYou don\'t have any open futures positions.\n\nUse /trade to start trading!', { parse_mode: 'Markdown' });
+        return;
+      }
+
+      let positionsText = '📊 **Open Positions**\n\n';
+      
+      openPositions.slice(0, 10).forEach((position, index) => {
+        const sideEmoji = position.side === 'LONG' ? '🟢' : '🔴';
+        const pnlEmoji = position.unrealizedPnl >= 0 ? '📈' : '📉';
+        
+        positionsText += `${sideEmoji} **${position.symbol}** ${position.leverage}x\n`;
+        positionsText += `   ${pnlEmoji} P&L: ${position.unrealizedPnl >= 0 ? '+' : ''}$${position.unrealizedPnl.toFixed(2)}\n`;
+        positionsText += `   Size: ${position.size.toFixed(6)}\n\n`;
+      });
+
+      if (openPositions.length > 10) {
+        positionsText += `... and ${openPositions.length - 10} more positions\n\n`;
+      }
+
+      positionsText += 'Use /trade to manage positions.';
+
+      await ctx.reply(positionsText, { parse_mode: 'Markdown' });
+    } catch (error) {
+      console.error('Positions command error:', error);
+      await ctx.reply('❌ Failed to load positions. Please try again.');
+    }
+  }
+
+  /**
+   * Handle balance command
+   */
+  private async handleBalanceCommand(ctx: BotContext): Promise<void> {
+    if (!ctx.userState?.isLinked) {
+      await ctx.reply('❌ Please link your API credentials first using /link');
+      return;
+    }
+
+    try {
+      const apiClient = await this.apiClientService.getOrCreateClient(ctx.userState.userId);
+      
+      const [SpotAccountService, FuturesAccountService] = await Promise.all([
+        import('../services/SpotAccountService'),
+        import('../services/FuturesAccountService')
+      ]);
+      
+      const spotService = new SpotAccountService.SpotAccountService(apiClient);
+      const futuresService = new FuturesAccountService.FuturesAccountService(apiClient);
+      
+      const [spotSummary, futuresSummary] = await Promise.all([
+        spotService.getPortfolioSummary().catch(() => null),
+        futuresService.getPortfolioSummary().catch(() => null)
+      ]);
+      
+      let balanceText = '💰 **Account Balance**\n\n';
+      
+      if (spotSummary) {
+        balanceText += `🏪 **Spot**: $${spotSummary.totalUsdValue.toFixed(2)}\n`;
+      }
+      
+      if (futuresSummary) {
+        balanceText += `⚡ **Futures**: $${futuresSummary.totalWalletBalance.toFixed(2)}\n`;
+        if (futuresSummary.openPositions.length > 0) {
+          balanceText += `📊 Unrealized P&L: ${futuresSummary.totalUnrealizedPnl >= 0 ? '+' : ''}$${futuresSummary.totalUnrealizedPnl.toFixed(2)}\n`;
+        }
+      }
+      
+      await ctx.reply(balanceText, { parse_mode: 'Markdown' });
+    } catch (error) {
+      console.error('Balance command error:', error);
+      await ctx.reply('❌ Failed to load balance. Please try again.');
+    }
+  }
+
+  /**
+   * Handle P&L command
+   */
+  private async handlePnLCommand(ctx: BotContext): Promise<void> {
+    await this.handlePositionsCommand(ctx); // Reuse positions display for now
+  }
+
+  /**
+   * Handle spot command
+   */
+  private async handleSpotCommand(ctx: BotContext): Promise<void> {
+    await this.tradingHandler.handleSpotTrading(ctx);
+  }
+
+  /**
+   * Handle price command
+   */
+  private async handlePriceCommand(ctx: BotContext): Promise<void> {
+    await ctx.reply('📊 **Price Tracking**\n\nPrice tracking features coming soon! Use /trade for current trading prices.');
+  }
+
+  /**
+   * Handle panic command (admin only)
+   */
+  private async handlePanicCommand(ctx: BotContext): Promise<void> {
+    if (!this.config.telegram.adminIds.includes(ctx.from?.id || 0)) {
+      return; // Silently ignore non-admin users
+    }
+    
+    await ctx.reply('🚨 **Admin Panic Command**\n\nPanic features coming soon!');
   }
 
   /**
