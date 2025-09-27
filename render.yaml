@@ -1,22 +1,22 @@
 services:
   - type: web
     name: aster-dex-telegram-bot
-    env: node
+    runtime: bun
     plan: starter
-    buildCommand: npm install && npm run build
-    startCommand: npm start
+    buildCommand: bun install
+    startCommand: bun start
     healthCheckPath: /health
     envVars:
       - key: NODE_ENV
         value: production
       - key: TELEGRAM_BOT_TOKEN
         sync: false
-      - key: TG_BOT_TOKEN  
+      - key: WEBHOOK_URL
+        value: https://aster-telegram-bot.onrender.com/webhook
+      - key: WEBHOOK_SECRET
         sync: false
-      - key: ASTER_API_KEY
-        sync: false
-      - key: ASTER_API_SECRET
-        sync: false
+      - key: WEBHOOK_PATH
+        value: /webhook
       - key: ASTER_BASE_URL
         value: https://fapi.asterdex.com
       - key: DATABASE_URL

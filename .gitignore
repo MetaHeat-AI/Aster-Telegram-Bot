@@ -14,3 +14,5 @@ coverage/
 artifacts/
 test-server.js
 aster_bot.db
+.env*
+old

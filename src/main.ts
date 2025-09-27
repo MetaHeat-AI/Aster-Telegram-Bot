@@ -11,8 +11,8 @@ dotenv.config();
 function loadConfig(): BotConfig {
   const config = {
     telegram: {
-      token: process.env.TELEGRAM_BOT_TOKEN || process.env.TG_BOT_TOKEN!,
-      adminIds: process.env.ADMIN_IDS?.split(',').map(id => parseInt(id.trim())) || [],
+      token: process.env.TELEGRAM_BOT_TOKEN!,
+      adminIds: process.env.ADMIN_IDS?.split(',').map(id => parseInt(id.trim())).filter(id => !isNaN(id)) || [],
     },
     aster: {
       baseUrl: process.env.ASTER_BASE_URL || 'https://fapi.asterdex.com',
@@ -30,6 +30,11 @@ function loadConfig(): BotConfig {
     },
     server: {
       port: parseInt(process.env.PORT || '3000'),
+    },
+    webhook: {
+      url: process.env.WEBHOOK_URL!,
+      secretToken: process.env.WEBHOOK_SECRET!,
+      path: process.env.WEBHOOK_PATH || '/webhook',
     },
     rateLimit: {
       windowMs: parseInt(process.env.RATE_LIMIT_WINDOW_MS || '60000'),

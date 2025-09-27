@@ -450,6 +450,11 @@ export interface BotConfig {
   server: {
     port: number;
   };
+  webhook: {
+    url: string;
+    secretToken: string;
+    path: string;
+  };
   rateLimit: {
     windowMs: number;
     maxRequests: number;
@@ -477,6 +482,11 @@ export const BotConfigSchema = z.object({
   }),
   server: z.object({
     port: z.number().default(3000),
+  }),
+  webhook: z.object({
+    url: z.string().url(),
+    secretToken: z.string().min(32),
+    path: z.string().default('/webhook'),
   }),
   rateLimit: z.object({
     windowMs: z.number().default(60000),

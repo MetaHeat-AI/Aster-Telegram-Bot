@@ -162,6 +162,15 @@ export class BotOrchestrator {
         // Add more metrics as needed
       });
     });
+
+    // Webhook endpoint
+    this.server.use(
+      this.config.webhook.path,
+      this.bot.webhookCallback(this.config.webhook.path, {
+        secretToken: this.config.webhook.secretToken
+      })
+    );
+    console.log(`[Orchestrator] Webhook endpoint configured at ${this.config.webhook.path}`);
     
     console.log('[Orchestrator] Server setup complete');
   }
@@ -278,8 +287,16 @@ export class BotOrchestrator {
         console.log(`[Server] Listening on port ${port}`);
       });
 
-      // Start bot
-      await this.bot.launch();
+      // Start bot (webhook only)
+      if (!this.config.webhook) {
+        throw new Error('Webhook configuration is required. Polling mode is no longer supported.');
+      }
+
+      await this.bot.telegram.setWebhook(this.config.webhook.url, {
+        secret_token: this.config.webhook.secretToken,
+        drop_pending_updates: true
+      });
+      console.log(`[Bot] Webhook set to ${this.config.webhook.url}`);
       
       this.eventEmitter.emitEvent({
         type: EventTypes.BOT_STARTED,
@@ -312,6 +329,14 @@ export class BotOrchestrator {
       userId: 0,
       telegramId: 0
     });
+
+    // Remove webhook
+    try {
+      await this.bot.telegram.deleteWebhook();
+      console.log('[Bot] Webhook removed');
+    } catch (error) {
+      console.warn('[Bot] Failed to remove webhook:', error);
+    }
 
     this.bot.stop();
     await this.db.disconnect();
