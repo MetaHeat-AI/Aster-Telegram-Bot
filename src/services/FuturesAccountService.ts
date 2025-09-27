@@ -205,117 +205,38 @@ export class FuturesAccountService {
   }
 
   formatFuturesPortfolio(summary: FuturesPortfolioSummary): string {
-    let output = [
-      '',
-      '⚡ **FUTURES PORTFOLIO**',
-      '─'.repeat(30),
-      ''
-    ].join('\n');
+    let output = '\n⚡ **FUTURES** • $' + summary.totalWalletBalance.toFixed(2) + '\n';
 
-    // Account overview with enhanced PnL display and risk metrics
-    const pnlEmoji = summary.totalUnrealizedPnl >= 0 ? '🟢' : '🔴';
-    const pnlPercent = summary.totalWalletBalance > 0 ? 
-      (summary.totalUnrealizedPnl / summary.totalWalletBalance * 100) : 0;
+    // Handle NaN values for PnL
+    const pnlValue = isNaN(summary.totalUnrealizedPnl) ? 0 : summary.totalUnrealizedPnl;
+    const pnlPercent = summary.totalWalletBalance > 0 && !isNaN(pnlValue) ? 
+      (pnlValue / summary.totalWalletBalance * 100) : 0;
 
-    // Enhanced status indicators
-    const statusEmoji = pnlPercent > 10 ? '🚀' : pnlPercent > 5 ? '📈' : pnlPercent < -10 ? '💥' : pnlPercent < -5 ? '📉' : '⚖️';
-    const riskLevel = summary.availableBalance / summary.totalWalletBalance;
-    const riskEmoji = riskLevel > 0.7 ? '🟢' : riskLevel > 0.3 ? '🟡' : '🔴';
-    
-    // Available balance percentage
-    const availablePercent = summary.totalWalletBalance > 0 ? (summary.availableBalance / summary.totalWalletBalance * 100) : 0;
-
-    output += [
-      `💰 **Total Balance:** $${summary.totalWalletBalance.toFixed(2)}`,
-      `💵 **Available:** $${summary.availableBalance.toFixed(2)} (${availablePercent.toFixed(1)}%) ${riskEmoji}`,
-      `📊 **Margin Balance:** $${summary.totalMarginBalance.toFixed(2)}`,
-      '',
-      `${statusEmoji} **Portfolio Performance:**`,
-      `${pnlEmoji} **P&L:** ${summary.totalUnrealizedPnl >= 0 ? '+' : ''}$${summary.totalUnrealizedPnl.toFixed(2)} (${pnlPercent >= 0 ? '+' : ''}${pnlPercent.toFixed(2)}%)`,
-      `📈 **Positions:** ${summary.openPositions.length} active`,
-      ''
-    ].join('\n');
-
-    // Open positions with enhanced visuals
+    // Compact status display
     if (summary.openPositions.length > 0) {
-      output += '📈 **Active Positions:**\n';
-      
-      summary.openPositions.forEach((position, index) => {
+      const pnlEmoji = pnlValue >= 0 ? '📈' : '📉';
+      output += `${pnlEmoji} P&L: ${pnlValue >= 0 ? '+' : ''}$${pnlValue.toFixed(2)} (${pnlPercent >= 0 ? '+' : ''}${pnlPercent.toFixed(1)}%)\n`;
+      output += `📊 ${summary.openPositions.length} position${summary.openPositions.length > 1 ? 's' : ''} • $${summary.availableBalance.toFixed(2)} free\n`;
+    } else {
+      output += `💰 Available: $${summary.availableBalance.toFixed(2)}\n`;
+      output += `📭 No positions • Ready to trade\n`;
+    }
+
+    // Show top 3 positions compactly if any exist
+    if (summary.openPositions.length > 0) {
+      summary.openPositions.slice(0, 3).forEach((position, index) => {
         const sideEmoji = position.side === 'LONG' ? '🟢' : '🔴';
-        const leverageEmoji = position.leverage >= 20 ? '⚡' : position.leverage >= 10 ? '🔥' : '💪';
-        const rank = index + 1;
-        const medalEmoji = rank === 1 ? '🥇' : rank === 2 ? '🥈' : rank === 3 ? '🥉' : '💫';
-        
-        // Use real-time PnL if available, otherwise use regular PnL
         const currentPnl = position.realTimeUnrealizedPnl !== undefined ? position.realTimeUnrealizedPnl : position.unrealizedPnl;
         const currentPnlPercent = position.realTimePnlPercent !== undefined ? position.realTimePnlPercent : position.pnlPercent;
-        
-        // Enhanced PnL visualization
         const pnlEmoji = currentPnl >= 0 ? '📈' : '📉';
-        const performanceEmoji = currentPnlPercent > 10 ? '🚀' : currentPnlPercent > 5 ? '🔥' : currentPnlPercent < -10 ? '💥' : currentPnlPercent < -5 ? '⚠️' : '⚖️';
         
-        // Calculate enhanced PnL bar with better scaling
-        const maxPnlPercent = 15; // Adjusted for better visual representation
-        const normalizedPnl = Math.min(Math.abs(currentPnlPercent), maxPnlPercent);
-        const barLength = Math.round((normalizedPnl / maxPnlPercent) * 12);
-        const pnlBar = currentPnlPercent >= 0 ? 
-          '🟩'.repeat(barLength) + '⬜'.repeat(12 - barLength) :
-          '🟥'.repeat(barLength) + '⬜'.repeat(12 - barLength);
-
-        // Price movement calculation
-        let priceMovement = '';
-        if (position.currentPrice && position.entryPrice) {
-          const changePercent = ((position.currentPrice - position.entryPrice) / position.entryPrice * 100);
-          const changeEmoji = changePercent >= 0 ? '📈' : '📉';
-          priceMovement = `   ${changeEmoji} Price: $${position.entryPrice.toFixed(4)} → $${position.currentPrice.toFixed(4)} (${changePercent >= 0 ? '+' : ''}${changePercent.toFixed(2)}%)`;
-        }
-
-        output += [
-          `${medalEmoji} **${rank}. ${position.symbol}** ${sideEmoji} ${position.side} ${performanceEmoji}`,
-          `   ${leverageEmoji} Leverage: ${position.leverage}x • Size: ${position.size.toFixed(4)}`,
-          priceMovement || `   💎 Entry: $${position.entryPrice.toFixed(4)}${position.currentPrice ? ` • Current: $${position.currentPrice.toFixed(4)}` : ''}`,
-          `   ${pnlEmoji} **P&L:** ${currentPnl >= 0 ? '+' : ''}$${currentPnl.toFixed(2)} (${currentPnlPercent >= 0 ? '+' : ''}${currentPnlPercent.toFixed(2)}%)`,
-          `   ${pnlBar}`,
-          `   💰 Notional: $${position.notional.toFixed(2)} • Margin: ${position.marginType}`,
-          ''
-        ].filter(Boolean).join('\n');
+        output += `${sideEmoji} ${position.symbol} ${position.leverage}x ${pnlEmoji} ${currentPnl >= 0 ? '+' : ''}$${currentPnl.toFixed(2)}\n`;
       });
-    } else {
-      output += [
-        '📭 **No Active Positions**',
-        '   🎯 Ready to trade! Use /trade to open positions.',
-        '   💡 Start with popular pairs like BTC/ETH/SOL',
-        ''
-      ].join('\n');
-    }
-
-    // Asset breakdown with enhanced visual improvements
-    const nonZeroAssets = summary.assets.filter(a => a.walletBalance > 0.01);
-    if (nonZeroAssets.length > 1) {
-      output += [
-        '🏦 **Asset Breakdown:**',
-        ''
-      ].join('\n');
       
-      nonZeroAssets.forEach((asset, index) => {
-        const pnlEmoji = asset.unrealizedPnl >= 0 ? '🟢' : '🔴';
-        const bullet = index === 0 ? '▸' : '▹';
-        
-        output += `   ${bullet} **${asset.asset}**: $${asset.walletBalance.toFixed(2)}`;
-        if (Math.abs(asset.unrealizedPnl) > 0.01) {
-          output += ` ${pnlEmoji} ${asset.unrealizedPnl >= 0 ? '+' : ''}$${asset.unrealizedPnl.toFixed(2)}`;
-        }
-        output += '\n';
-      });
-      output += '\n';
+      if (summary.openPositions.length > 3) {
+        output += `▫ +${summary.openPositions.length - 3} more positions\n`;
+      }
     }
-
-    // Add footer with helpful information
-    output += [
-      '─'.repeat(25),
-      '💡 *Use /refresh to update • /trade to start trading*',
-      ''
-    ].join('\n');
 
     return output;
   }

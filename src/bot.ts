@@ -1275,7 +1275,7 @@ Please send your **API Key** now:
 
 Choose from all available functions:
 
-🔗 **Account**: ${ctx.userState?.isLinked ? '✅ API Linked' : '❌ API Not Linked'}
+🔗 **Account**: ${ctx.userState?.isLinked ? '✅ API Linked & Secured' : '❌ API Not Linked'}
 💰 **Quick Actions**: Trade, View Positions, Check Balance
 📊 **Analysis**: P&L Reports, Market Data
 ⚙️ **Settings**: Configure Trading Preferences
@@ -1924,18 +1924,14 @@ ${trade.maxSlippageExceeded ? '\n❌ **Max slippage exceeded**' : ''}
         })
       ]);
       
-      // Create beautiful header with portfolio value
+      // Create compact header
       let totalValue = 0;
       if (spotPortfolio) totalValue += spotPortfolio.totalUsdValue;
       if (futuresPortfolio) totalValue += futuresPortfolio.totalWalletBalance;
       
       let balanceText = [
-        '💰 **PORTFOLIO OVERVIEW**',
-        '═'.repeat(40),
-        '',
-        `🏦 **Total Value: $${totalValue.toFixed(2)}**`,
-        '',
-        '📊 **Account Breakdown:**'
+        '💰 **PORTFOLIO** • $' + totalValue.toFixed(2),
+        '─'.repeat(25)
       ].join('\n');
       
       // Spot Portfolio
