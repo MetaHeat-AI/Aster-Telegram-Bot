@@ -165,19 +165,28 @@ class AsterTradingBot {
     // Start command
     this.bot.command('start', async (ctx) => {
       const welcomeText = `
-🚀 **Welcome to Aster Trading Bot!**
+🚀 **Welcome to AsterBot — Your Aster Telegram Terminal**
 
-Professional DEX trading with advanced features:
-• 📈 Spot & Perpetual Futures Trading
-• 🎯 Take Profit & Stop Loss Management  
-• 🛡️ Price Protection & Slippage Control
-• 📊 Real-time P&L & Position Monitoring
-• 💰 Custom Amount & Natural Language Input
-• 🔔 Live Trade Notifications
+Trade Aster DEX directly on Telegram — faster, more convenient, and always at your fingertips. Execute trades instantly, manage positions in real time, receive live alerts, and control your wallets without switching platforms. All powered via the official @Aster_Dex API.
 
-⚠️ **Risk Disclaimer**: Trading involves significant risk. Only trade with funds you can afford to lose.
+**🌟 Why Choose AsterBot?**
 
-Choose an action below to get started:
+• 🔒 **Secure API Execution** — Your keys, your control
+• ✅ **Spot & Perpetual Trading** — Access the full market
+• 🎯 **Smart Take Profit & Stop Loss** — Execute trades with precision
+• 🛡️ **Price & Slippage Protection** — Powered by Aster
+• 🦅 **Real-Time P&L & Position Tracking**
+• 💰 **Custom Trade Amounts & Natural Language Input**
+• 🔔 **One-Click Market Alerts**
+• 🔥 **Zero Fees**
+• 🏆 **Earn Rewards & Points for Airdrops** on the go
+
+**🔐 Security & Control:**
+Your API keys remain secure and under your full control. AsterBot never stores your private keys or has access to withdrawals.
+
+⚠️ **Disclaimer**: You can always create a test wallet first to explore features. Trading involves risk — only trade with funds you can afford to lose.
+
+**Choose an action below to get started:**
       `;
 
       await ctx.reply(welcomeText, { parse_mode: 'Markdown', ...this.getMainMenuKeyboard() });
@@ -1317,8 +1326,13 @@ Select an option below:
 • \`/link\` - Link API credentials securely
 • \`/unlink\` - Remove API credentials
 
-**📊 Market Data:**
-• \`/price SYMBOL\` - Current price & 24h change
+**📊 Market Data & Price Discovery:**
+• \`/price\` - **Complete price discovery center**
+  └ 🏆 Top tokens by market cap
+  └ 📈 Top tokens by volume  
+  └ ⭐ Quick watchlist
+  └ 🔍 Price comparison
+  └ 📊 Market overview
 
 **💡 Getting Started:**
 1. Use \`/link\` to connect your Aster DEX API keys
@@ -1373,7 +1387,7 @@ ${TradeParser.generateExamples().map(ex => `• \`${ex}\``).join('\n')}
         { command: 'link', description: '🔗 Link API credentials securely' },
         { command: 'settings', description: '⚙️ Configure trading preferences' },
         { command: 'help', description: '📖 Complete trading guide & commands' },
-        { command: 'price', description: '💹 Get current price for symbol' }
+        { command: 'price', description: '💹 Price discovery center & market data' }
       ];
 
       await this.bot.telegram.setMyCommands(commands);
