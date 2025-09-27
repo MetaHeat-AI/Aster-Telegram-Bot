@@ -1,4 +1,4 @@
-import { Telegraf } from 'telegraf';
+import { Telegraf, Markup } from 'telegraf';
 import express from 'express';
 
 import { BotConfig } from '../types';
@@ -327,7 +327,7 @@ export class BotOrchestrator {
     );
 
     this.bot.action('settings', (ctx) => 
-      this.handlePlaceholderAction(ctx, '⚙️ Settings feature coming soon!')
+      this.handleSettingsMenu(ctx)
     );
 
     this.bot.action('help', (ctx) => 
@@ -339,23 +339,23 @@ export class BotOrchestrator {
     );
 
     this.bot.action('spot_assets', (ctx) => 
-      this.handlePlaceholderAction(ctx, '🏦 Spot assets feature coming soon!')
+      this.handleSpotAssetsCommand(ctx)
     );
 
     this.bot.action('spot_sell_menu', (ctx) => 
-      this.handlePlaceholderAction(ctx, '💱 Spot sell menu coming soon!')
+      this.handleSpotSellMenu(ctx)
     );
 
     this.bot.action('spot_custom_pair', (ctx) => 
-      this.handlePlaceholderAction(ctx, '🎯 Custom spot pair feature coming soon!')
+      this.handleCustomPairInput(ctx, 'spot')
     );
 
     this.bot.action('perps_custom_pair', (ctx) => 
-      this.handlePlaceholderAction(ctx, '🎯 Custom perps pair feature coming soon!')
+      this.handleCustomPairInput(ctx, 'perps')
     );
 
     this.bot.action('pnl_analysis', (ctx) => 
-      this.handlePlaceholderAction(ctx, '📈 P&L Analysis feature coming soon!')
+      this.handlePnLAnalysis(ctx)
     );
 
     // Spot execute trade handlers
@@ -423,8 +423,9 @@ export class BotOrchestrator {
 
     // Position management handlers
     this.bot.action(/^position_(.+)_(.+)$/, (ctx) => {
-      const [, action, symbol] = ctx.match;
-      this.handlePlaceholderAction(ctx, `📊 Position ${action} for ${symbol} - Feature coming soon!`);
+      const action = ctx.match[1];
+      const symbol = ctx.match[2];
+      this.handlePositionAction(ctx, action, symbol);
     });
 
     // Quick trading handlers
@@ -463,12 +464,12 @@ export class BotOrchestrator {
     // Spot asset selling handlers
     this.bot.action(/^spot_sell_([A-Z0-9]+)$/, (ctx) => {
       const asset = ctx.match[1];
-      this.handlePlaceholderAction(ctx, `💱 Sell ${asset} - Feature coming soon!`);
+      this.handleSpotSellAsset(ctx, asset);
     });
 
     this.bot.action(/^spot_sell_([A-Z0-9]+)_(\d+)pct$/, (ctx) => {
       const [, asset, percentage] = ctx.match;
-      this.handlePlaceholderAction(ctx, `💱 Sell ${percentage}% of ${asset} - Feature coming soon!`);
+      this.executeSpotSale(ctx, asset, parseInt(percentage));
     });
 
     // Price tracking handlers
@@ -517,7 +518,14 @@ export class BotOrchestrator {
     this.bot.on('text', (ctx) => {
       // Handle conversation states and natural language commands
       console.log(`[Text] Received: ${ctx.message.text} from user ${ctx.userState?.userId}`);
-      // Add text processing logic here
+      
+      // Check if expecting custom pair input
+      if ((ctx.userState as any)?.expectingCustomPair) {
+        this.handleCustomPairText(ctx, ctx.message.text);
+        return;
+      }
+      
+      // Add other text processing logic here if needed
     });
 
     console.log('[Orchestrator] Text handlers registered');
@@ -785,6 +793,11 @@ export class BotOrchestrator {
           console.warn('[Orchestrator] Could not mark trade executed:', error);
         }
 
+        // Calculate position size in USDT (notional value)
+        const executedPrice = parseFloat(orderResult.avgPrice || currentPrice.toString());
+        const executedQuantity = parseFloat(orderResult.executedQty);
+        const positionSizeUSDT = executedQuantity * executedPrice;
+
         // Success message
         await ctx.telegram.editMessageText(
           ctx.chat?.id,
@@ -794,8 +807,8 @@ export class BotOrchestrator {
           `**Symbol:** ${symbol}\n` +
           `**Margin:** $${amount}\n` +
           `**Leverage:** ${leverage}x\n` +
-          `**Position Size:** ${orderResult.executedQty}\n` +
-          `**Entry Price:** $${orderResult.avgPrice || currentPrice.toFixed(6)}\n` +
+          `**Position Size:** ${positionSizeUSDT.toFixed(2)} USDT\n` +
+          `**Entry Price:** $${executedPrice.toFixed(6)}\n` +
           `**Order ID:** ${orderResult.orderId}\n\n` +
           `🎉 Position opened successfully!\n\n` +
           `🔙 Use /menu to return to main menu.`,
@@ -926,7 +939,7 @@ If you need help, contact support or check the documentation.
   }
 
   /**
-   * Handle positions command
+   * Handle positions command - FULL ORIGINAL IMPLEMENTATION
    */
   private async handlePositionsCommand(ctx: BotContext): Promise<void> {
     if (!ctx.userState?.isLinked) {
@@ -935,6 +948,7 @@ If you need help, contact support or check the documentation.
     }
 
     try {
+      console.log('[POSITIONS] Fetching positions with enhanced data...');
       const apiClient = await this.apiClientService.getOrCreateClient(ctx.userState.userId);
       const FuturesAccountService = await import('../services/FuturesAccountService');
       const futuresService = new FuturesAccountService.FuturesAccountService(apiClient);
@@ -942,31 +956,71 @@ If you need help, contact support or check the documentation.
       const openPositions = await futuresService.getOpenPositions();
       
       if (openPositions.length === 0) {
-        await ctx.reply('📊 **No Open Positions**\n\nYou don\'t have any open futures positions.\n\nUse /trade to start trading!', { parse_mode: 'Markdown' });
+        const keyboard = Markup.inlineKeyboard([
+          [
+            Markup.button.callback('📈 Start Trading', 'unified_trade'),
+            Markup.button.callback('💰 Balance', 'balance')
+          ],
+          [
+            Markup.button.callback('🔙 Back', 'main_menu')
+          ]
+        ]);
+        
+        await ctx.reply('📊 **No Open Positions**\n\nYou don\'t have any open futures positions.\n\nUse the trading interface to open positions!', { parse_mode: 'Markdown', ...keyboard });
         return;
       }
 
       let positionsText = '📊 **Open Positions**\n\n';
       
-      openPositions.slice(0, 10).forEach((position, index) => {
+      openPositions.forEach(position => {
         const sideEmoji = position.side === 'LONG' ? '🟢' : '🔴';
-        const pnlEmoji = position.unrealizedPnl >= 0 ? '📈' : '📉';
+        const sideText = `${sideEmoji} ${position.side}`;
         
-        positionsText += `${sideEmoji} **${position.symbol}** ${position.leverage}x\n`;
-        positionsText += `   ${pnlEmoji} P&L: ${position.unrealizedPnl >= 0 ? '+' : ''}$${position.unrealizedPnl.toFixed(2)}\n`;
-        positionsText += `   Size: ${position.size.toFixed(6)}\n\n`;
+        // Use real-time PnL if available, fallback to API PnL
+        const displayPnl = position.realTimeUnrealizedPnl ?? position.unrealizedPnl;
+        const displayPnlPercent = position.realTimePnlPercent ?? position.pnlPercent;
+        
+        const pnlEmoji = displayPnl >= 0 ? '📈' : '📉';
+        const pnlColor = displayPnl >= 0 ? '🟢' : '🔴';
+        
+        // Debug logging
+        console.log(`[POSITIONS] ${position.symbol}: API PnL=${position.unrealizedPnl}, Real-time PnL=${position.realTimeUnrealizedPnl}, Current Price=${position.currentPrice}`);
+        
+        positionsText += [
+          `**${position.symbol}** ${sideText}`,
+          `• Size: ${position.notional.toFixed(2)} USDT`,
+          `• Entry: $${position.entryPrice.toFixed(4)}`,
+          position.currentPrice ? `• Current: $${position.currentPrice.toFixed(4)}` : '',
+          `• Leverage: ${position.leverage}x`,
+          `• ${pnlColor} ${pnlEmoji} PnL: ${displayPnl >= 0 ? '+' : ''}$${displayPnl.toFixed(2)} (${displayPnlPercent >= 0 ? '+' : ''}${displayPnlPercent.toFixed(1)}%)`,
+          position.currentPrice ? '' : '⚠️ (Real-time price unavailable)',
+          '',
+        ].filter(Boolean).join('\n');
       });
 
-      if (openPositions.length > 10) {
-        positionsText += `... and ${openPositions.length - 10} more positions\n\n`;
+      // Enhanced positions with quick trading buttons and refresh functionality
+      const keyboard = Markup.inlineKeyboard([
+        ...openPositions.map(pos => [
+          Markup.button.callback(`📊 ${pos.symbol}`, `position_manage_${pos.symbol}`),
+          Markup.button.callback(`⚡ Quick Trade`, `quick_trade_${pos.symbol}`)
+        ]),
+        [
+          Markup.button.callback('🔄 Refresh', 'positions'),
+          Markup.button.callback('📈 P&L Analysis', 'pnl_analysis')
+        ]
+      ]);
+
+      try {
+        await ctx.editMessageText(positionsText, { parse_mode: 'Markdown', ...keyboard });
+        console.log('[POSITIONS] Successfully displayed enhanced position data via edit');
+      } catch (error) {
+        await ctx.reply(positionsText, { parse_mode: 'Markdown', ...keyboard });
+        console.log('[POSITIONS] Successfully displayed enhanced position data via reply');
       }
 
-      positionsText += 'Use /trade to manage positions.';
-
-      await ctx.reply(positionsText, { parse_mode: 'Markdown' });
     } catch (error) {
       console.error('Positions command error:', error);
-      await ctx.reply('❌ Failed to load positions. Please try again.');
+      await ctx.reply('❌ Failed to fetch positions. Please try again.');
     }
   }
 
@@ -1016,6 +1070,89 @@ If you need help, contact support or check the documentation.
   }
 
   /**
+   * Handle spot assets command - displays assets not positions
+   */
+  private async handleSpotAssetsCommand(ctx: BotContext): Promise<void> {
+    if (!ctx.userState?.isLinked) {
+      await ctx.reply('❌ Please link your API credentials first using /link');
+      return;
+    }
+
+    try {
+      const apiClient = await this.apiClientService.getOrCreateClient(ctx.userState.userId);
+      const SpotAccountService = await import('../services/SpotAccountService');
+      const spotService = new SpotAccountService.SpotAccountService(apiClient);
+      
+      const spotSummary = await spotService.getPortfolioSummary();
+      
+      if (spotSummary.totalAssets === 0) {
+        const keyboard = Markup.inlineKeyboard([
+          [
+            Markup.button.callback('📈 Start Trading', 'trade_spot'),
+            Markup.button.callback('💰 Balance', 'balance')
+          ],
+          [
+            Markup.button.callback('🔙 Back', 'main_menu')
+          ]
+        ]);
+        
+        await ctx.reply('🏪 **No Spot Assets**\n\nYou don\'t have any spot assets.\n\nUse the trading interface to buy some assets!', { parse_mode: 'Markdown', ...keyboard });
+        return;
+      }
+
+      let assetsText = `🏪 **Spot Assets** • $${spotSummary.totalUsdValue.toFixed(2)}\n\n`;
+      
+      // Show main assets (>= $10 value)
+      if (spotSummary.mainAssets.length > 0) {
+        assetsText += '**📊 Main Assets:**\n';
+        spotSummary.mainAssets.forEach((asset, index) => {
+          const percentage = spotSummary.totalUsdValue > 0 ? (asset.usdValue! / spotSummary.totalUsdValue * 100) : 0;
+          const emoji = index === 0 ? '▸' : '▫';
+          assetsText += `${emoji} **${asset.asset}**: $${asset.usdValue!.toFixed(2)} (${percentage.toFixed(1)}%)\n`;
+          assetsText += `   Amount: ${asset.total.toFixed(6)}\n`;
+          if (parseFloat(asset.locked) > 0) {
+            assetsText += `   Locked: ${parseFloat(asset.locked).toFixed(6)}\n`;
+          }
+          assetsText += '\n';
+        });
+      }
+
+      // Show small balances if any
+      if (spotSummary.smallBalances.length > 0) {
+        const smallTotal = spotSummary.smallBalances.reduce((sum, b) => sum + (b.usdValue || 0), 0);
+        assetsText += `**🔹 Small Assets** (${spotSummary.smallBalances.length} assets):\n`;
+        assetsText += `Total Value: $${smallTotal.toFixed(2)}\n\n`;
+        
+        // Show first few small assets
+        spotSummary.smallBalances.slice(0, 5).forEach(asset => {
+          assetsText += `▫ ${asset.asset}: ${asset.total.toFixed(6)} ($${(asset.usdValue || 0).toFixed(2)})\n`;
+        });
+        
+        if (spotSummary.smallBalances.length > 5) {
+          assetsText += `▫ +${spotSummary.smallBalances.length - 5} more...\n`;
+        }
+      }
+
+      const keyboard = Markup.inlineKeyboard([
+        [
+          Markup.button.callback('🔄 Refresh Assets', 'spot_assets'),
+          Markup.button.callback('📈 Trade Spot', 'trade_spot')
+        ],
+        [
+          Markup.button.callback('💰 Full Balance', 'balance'),
+          Markup.button.callback('🔙 Back', 'main_menu')
+        ]
+      ]);
+
+      await ctx.reply(assetsText, { parse_mode: 'Markdown', ...keyboard });
+
+    } catch (error) {
+      console.error('[Orchestrator] Spot assets command error:', error);
+      await ctx.reply('❌ Failed to load spot assets. Please try again.');
+    }
+  }
+
+  /**
    * Handle P&L command
    */
   private async handlePnLCommand(ctx: BotContext): Promise<void> {
@@ -1048,6 +1185,165 @@ If you need help, contact support or check the documentation.
   }
 
   /**
+   * Handle position management actions
+   */
+  private async handlePositionAction(ctx: BotContext, action: string, symbol: string): Promise<void> {
+    if (!ctx.userState?.isLinked) {
+      await ctx.reply('❌ Please link your API credentials first using /link');
+      return;
+    }
+
+    try {
+      const apiClient = await this.apiClientService.getOrCreateClient(ctx.userState.userId);
+
+      switch (action) {
+        case 'manage':
+          await this.showPositionManagementMenu(ctx, symbol, apiClient);
+          break;
+        case 'close':
+          await this.handleClosePosition(ctx, symbol, apiClient, 100);
+          break;
+        case 'close_25':
+          await this.handleClosePosition(ctx, symbol, apiClient, 25);
+          break;
+        case 'close_50':
+          await this.handleClosePosition(ctx, symbol, apiClient, 50);
+          break;
+        case 'close_75':
+          await this.handleClosePosition(ctx, symbol, apiClient, 75);
+          break;
+        case 'set_sl':
+          await this.handlePlaceholderAction(ctx, `🛡️ Set Stop Loss for ${symbol} - Feature coming soon!`);
+          break;
+        case 'set_tp':
+          await this.handlePlaceholderAction(ctx, `🎯 Set Take Profit for ${symbol} - Feature coming soon!`);
+          break;
+        case 'add_margin':
+          await this.handlePlaceholderAction(ctx, `➕ Add Margin for ${symbol} - Feature coming soon!`);
+          break;
+        case 'reduce_margin':
+          await this.handlePlaceholderAction(ctx, `➖ Reduce Margin for ${symbol} - Feature coming soon!`);
+          break;
+        default:
+          await ctx.reply(`❌ Unknown position action: ${action}`);
+      }
+    } catch (error: any) {
+      console.error(`Position action error for ${symbol}:`, error);
+      await ctx.reply(`❌ Failed to ${action} position for ${symbol}: ${error.message || 'Unknown error'}`);
+    }
+  }
+
+  /**
+   * Show position management menu
+   */
+  private async showPositionManagementMenu(ctx: BotContext, symbol: string, apiClient: any): Promise<void> {
+    try {
+      const positions = await apiClient.getPositionRisk();
+      const position = positions.find((p: any) => p.symbol === symbol && parseFloat(p.positionAmt) !== 0);
+      
+      if (!position) {
+        await ctx.reply(`❌ No open position found for ${symbol}`);
+        return;
+      }
+
+      const positionAmt = parseFloat(position.positionAmt);
+      const side = positionAmt > 0 ? 'LONG' : 'SHORT';
+      const pnl = parseFloat(position.unrealizedPnl) || 0;
+      const pnlEmoji = pnl >= 0 ? '🟢' : '🔴';
+      
+      const positionText = [
+        `📊 **${symbol} Position Management**`,
+        '',
+        `**Side:** ${side}`,
+        `**Size:** ${Math.abs(positionAmt)}`,
+        `**Entry Price:** $${position.entryPrice}`,
+        `**Leverage:** ${position.leverage}x`,
+        `**${pnlEmoji} P&L:** $${pnl.toFixed(2)}`,
+        '',
+        'Choose an action:',
+      ].join('\n');
+
+      const keyboard = Markup.inlineKeyboard([
+        [
+          Markup.button.callback('🔴 Close 25%', `position_close_25_${symbol}`),
+          Markup.button.callback('🔴 Close 50%', `position_close_50_${symbol}`)
+        ],
+        [
+          Markup.button.callback('🔴 Close 75%', `position_close_75_${symbol}`),
+          Markup.button.callback('🔴 Close 100%', `position_close_${symbol}`)
+        ],
+        [
+          Markup.button.callback('🛡️ Set Stop Loss', `position_set_sl_${symbol}`),
+          Markup.button.callback('🎯 Set Take Profit', `position_set_tp_${symbol}`)
+        ],
+        [
+          Markup.button.callback('➕ Add Margin', `position_add_margin_${symbol}`),
+          Markup.button.callback('➖ Reduce Margin', `position_reduce_margin_${symbol}`)
+        ],
+        [
+          Markup.button.callback('🔙 Back to Positions', 'positions')
+        ]
+      ]);
+
+      await ctx.editMessageText(positionText, { parse_mode: 'Markdown', ...keyboard });
+    } catch (error) {
+      console.error('Position management menu error:', error);
+      await ctx.reply('❌ Failed to load position details. Please try again.');
+    }
+  }
+
+  /**
+   * Handle closing position (full or partial)
+   */
+  private async handleClosePosition(ctx: BotContext, symbol: string, apiClient: any, percentage: number): Promise<void> {
+    try {
+      await ctx.answerCbQuery(`🔄 Closing ${percentage}% of ${symbol} position...`);
+      
+      const processingMsg = await ctx.reply(
+        `🔄 **Closing Position**\n\n` +
+        `**Symbol:** ${symbol}\n` +
+        `**Amount:** ${percentage}%\n\n` +
+        `⏳ Processing closure...`,
+        { parse_mode: 'Markdown' }
+      );
+
+      // Use the existing closePosition method from AsterApiClient
+      const result = await apiClient.closePosition(symbol, percentage);
+      
+      await ctx.telegram.editMessageText(
+        ctx.chat?.id,
+        processingMsg.message_id,
+        undefined,
+        `✅ **Position Closed Successfully**\n\n` +
+        `**Symbol:** ${symbol}\n` +
+        `**Amount:** ${percentage}%\n` +
+        `**Order ID:** ${result.orderId}\n` +
+        `**Status:** ${result.status}\n\n` +
+        `🎉 Position closure completed!\n\n` +
+        `Use /positions to view updated positions.`,
+        { parse_mode: 'Markdown' }
+      );
+
+      // Emit event
+      this.eventEmitter.emitEvent({
+        type: EventTypes.TRADE_EXECUTED,
+        timestamp: new Date(),
+        userId: ctx.userState!.userId,
+        telegramId: ctx.userState!.telegramId,
+        correlationId: ctx.correlationId,
+        symbol,
+        action: 'CLOSE',
+        amount: percentage,
+        orderId: result.orderId
+      });
+
+    } catch (error: any) {
+      console.error('Close position error:', error);
+      await ctx.reply(`❌ **Position Closure Failed**\n\n**Symbol:** ${symbol}\n**Error:** ${error.message || 'Unknown error'}\n\n🔄 Please try again.`);
+    }
+  }
+
+  /**
    * Format quantity with proper precision based on symbol's LOT_SIZE filter
    * This prevents "Precision is over the maximum defined" errors
    */
@@ -1076,6 +1372,476 @@ If you need help, contact support or check the documentation.
       console.warn(`[PRECISION] Failed to get precision for ${symbol}, using default:`, error);
       return rawQuantity.toFixed(6);
     }
+  }
+
+  /**
+   * Handle P&L Analysis - comprehensive profit/loss analysis
+   */
+  private async handlePnLAnalysis(ctx: BotContext): Promise<void> {
+    if (!ctx.userState?.isLinked) {
+      await ctx.reply('❌ Please link your API credentials first using /link');
+      return;
+    }
+
+    try {
+      // Import and use the existing PnL module
+      const PnLModule = await import('../pnl');
+      const apiClient = await this.apiClientService.getOrCreateClient(ctx.userState.userId);
+      const pnlCalculator = new PnLModule.PnLCalculator(apiClient);
+      
+      // Calculate comprehensive P&L
+      const pnlData = await pnlCalculator.calculateComprehensivePnL();
+      
+      let analysisText = '📈 **P&L Analysis**\n\n';
+      
+      // Overview
+      if (pnlData.success && pnlData.totalCurrentValue && pnlData.totalPnL !== undefined) {
+        analysisText += `💰 **Total Portfolio:** $${pnlData.totalCurrentValue.toFixed(2)}\n`;
+        analysisText += `📊 **Total P&L:** ${pnlData.totalPnL >= 0 ? '+' : ''}$${pnlData.totalPnL.toFixed(2)}\n`;
+        if (pnlData.totalPnLPercent !== undefined) {
+          analysisText += `📈 **Total ROI:** ${pnlData.totalPnLPercent >= 0 ? '+' : ''}${pnlData.totalPnLPercent.toFixed(2)}%\n\n`;
+        }
+        
+        // Display positions summary
+        if (pnlData.positions && pnlData.positions.length > 0) {
+          analysisText += `🏪 **Spot Positions:** ${pnlData.positions.length}\n`;
+        }
+        
+        if (pnlData.perpPositions && pnlData.perpPositions.length > 0) {
+          analysisText += `⚡ **Perp Positions:** ${pnlData.perpPositions.length}\n`;
+        }
+      } else {
+        analysisText += `❌ ${pnlData.message || 'Failed to calculate P&L'}\n`;
+      }
+      
+      const keyboard = Markup.inlineKeyboard([
+        [
+          Markup.button.callback('🔄 Refresh', 'pnl_analysis'),
+          Markup.button.callback('📊 Positions', 'positions')
+        ],
+        [
+          Markup.button.callback('💰 Balance', 'balance'),
+          Markup.button.callback('🔙 Back', 'main_menu')
+        ]
+      ]);
+
+      await ctx.editMessageText(analysisText, { parse_mode: 'Markdown', ...keyboard });
+
+    } catch (error) {
+      console.error('[Orchestrator] P&L analysis error:', error);
+      await ctx.reply('❌ Failed to calculate P&L analysis. Please try again.');
+    }
+  }
+
+  /**
+   * Handle Settings Menu - bot configuration settings
+   */
+  private async handleSettingsMenu(ctx: BotContext): Promise<void> {
+    if (!ctx.userState?.isLinked) {
+      await ctx.reply('❌ Please link your API credentials first using /link');
+      return;
+    }
+
+    try {
+      // Import and use the existing Settings module
+      const SettingsModule = await import('../settings');
+      const settingsManager = new SettingsModule.SettingsManager(this.db, this.encryption);
+
+      const userId = ctx.userState.userId;
+      const userSettings = await settingsManager.getUserSettings(userId);
+      
+      let settingsText = '⚙️ **Bot Settings**\n\n';
+      
+      // Display current settings
+      settingsText += `🎯 **Leverage Cap:** ${userSettings.leverage_cap}x\n`;
+      settingsText += `💰 **Default Leverage:** ${userSettings.default_leverage}x\n`;
+      settingsText += `📊 **Slippage Tolerance:** ${(userSettings.slippage_bps / 100).toFixed(2)}%\n`;
+      settingsText += `🛡️ **Daily Loss Cap:** ${userSettings.daily_loss_cap ? '$' + userSettings.daily_loss_cap : 'None'}\n`;
+      settingsText += `🔒 **PIN Protection:** ${userSettings.pin_hash ? 'Enabled' : 'Disabled'}\n\n`;
+      
+      settingsText += '🔧 **Available Settings:**\n';
+      settingsText += '• Leverage limits for safety\n';
+      settingsText += '• Default trade sizes\n';
+      settingsText += '• Risk management settings\n';
+      settingsText += '• Security preferences\n';
+      
+      const keyboard = Markup.inlineKeyboard([
+        [
+          Markup.button.callback('🎯 Leverage', 'settings_leverage'),
+          Markup.button.callback('💰 Size', 'settings_size')
+        ],
+        [
+          Markup.button.callback('🛡️ Risk', 'settings_risk'),
+          Markup.button.callback('🔒 Security', 'settings_security')
+        ],
+        [
+          Markup.button.callback('🔄 Refresh', 'settings'),
+          Markup.button.callback('🔙 Back', 'main_menu')
+        ]
+      ]);
+
+      await ctx.editMessageText(settingsText, { parse_mode: 'Markdown', ...keyboard });
+
+    } catch (error) {
+      console.error('[Orchestrator] Settings menu error:', error);
+      await ctx.reply('❌ Failed to load settings. Please try again.');
+    }
+  }
+
+  /**
+   * Handle spot sell menu - displays assets available for selling
+   */
+  private async handleSpotSellMenu(ctx: BotContext): Promise<void> {
+    if (!ctx.userState?.isLinked) {
+      await ctx.reply('❌ Please link your API credentials first using /link');
+      return;
+    }
+
+    try {
+      const apiClient = await this.apiClientService.getOrCreateClient(ctx.userState.userId);
+      const SpotAccountService = await import('../services/SpotAccountService');
+      const spotService = new SpotAccountService.SpotAccountService(apiClient);
+      
+      const balances = await spotService.getSpotBalances();
+      
+      // Filter assets for selling: exclude USDT, minimum balance 0.0001
+      const sellableAssets = balances.filter(balance => 
+        balance.asset !== 'USDT' && 
+        balance.total >= 0.0001
+      );
+      
+      if (sellableAssets.length === 0) {
+        const keyboard = Markup.inlineKeyboard([
+          [
+            Markup.button.callback('📈 Buy Assets', 'trade_spot'),
+            Markup.button.callback('💰 Balance', 'balance')
+          ],
+          [
+            Markup.button.callback('🔙 Back', 'trade_spot')
+          ]
+        ]);
+        
+        await ctx.editMessageText(
+          '💱 **No Assets to Sell**\n\n' +
+          'You don\'t have any sellable assets.\n\n' +
+          'Use the trading interface to buy some assets first!',
+          { parse_mode: 'Markdown', ...keyboard }
+        );
+        return;
+      }
+
+      let sellText = '💱 **Sell Spot Assets**\n\n';
+      sellText += '📊 **Available Assets:**\n\n';
+
+      // Create buttons for sellable assets (2 per row, max 16)
+      const assetButtons = sellableAssets.slice(0, 16).map(asset => {
+        const displayText = asset.usdValue && asset.usdValue > 0.01 
+          ? `${asset.asset} ($${asset.usdValue.toFixed(2)})`
+          : asset.asset;
+        
+        sellText += `• **${asset.asset}**: ${asset.total.toFixed(6)} ($${(asset.usdValue || 0).toFixed(2)})\n`;
+        
+        return Markup.button.callback(displayText, `spot_sell_${asset.asset}`);
+      });
+
+      // Arrange buttons in rows of 2
+      const buttonRows = [];
+      for (let i = 0; i < assetButtons.length; i += 2) {
+        buttonRows.push(assetButtons.slice(i, i + 2));
+      }
+
+      // Add navigation buttons
+      buttonRows.push([
+        Markup.button.callback('🔄 Refresh', 'spot_sell_menu'),
+        Markup.button.callback('🔙 Back', 'trade_spot')
+      ]);
+
+      const keyboard = Markup.inlineKeyboard(buttonRows);
+
+      await ctx.editMessageText(sellText, { parse_mode: 'Markdown', ...keyboard });
+
+    } catch (error) {
+      console.error('[Orchestrator] Spot sell menu error:', error);
+      await ctx.reply('❌ Failed to load sellable assets. Please try again.');
+    }
+  }
+
+  /**
+   * Handle selling specific spot asset
+   */
+  private async handleSpotSellAsset(ctx: BotContext, asset: string): Promise<void> {
+    if (!ctx.userState?.isLinked) {
+      await ctx.reply('❌ Please link your API credentials first using /link');
+      return;
+    }
+
+    try {
+      const apiClient = await this.apiClientService.getOrCreateClient(ctx.userState.userId);
+      const SpotAccountService = await import('../services/SpotAccountService');
+      const spotService = new SpotAccountService.SpotAccountService(apiClient);
+      
+      const assetBalance = await spotService.getAssetBalance(asset);
+      
+      if (!assetBalance || assetBalance.total < 0.0001) {
+        await ctx.editMessageText(
+          `❌ **Insufficient Balance**\n\n` +
+          `**Asset:** ${asset}\n` +
+          `**Available:** ${assetBalance?.total.toFixed(6) || '0'}\n\n` +
+          `🔄 Use the refresh button to update balances.`,
+          { 
+            parse_mode: 'Markdown',
+            ...Markup.inlineKeyboard([
+              [Markup.button.callback('🔙 Back to Sell Menu', 'spot_sell_menu')]
+            ])
+          }
+        );
+        return;
+      }
+
+      // Get current price
+      const symbol = `${asset}USDT`;
+      let currentPrice = 0;
+      let usdValue = 0;
+      
+      try {
+        const tickers = await apiClient.getAllSpotTickers();
+        const ticker = tickers.find(t => t.symbol === symbol);
+        if (ticker) {
+          currentPrice = parseFloat(ticker.lastPrice);
+          usdValue = assetBalance.total * currentPrice;
+        }
+      } catch (priceError) {
+        console.warn(`Failed to get price for ${symbol}:`, priceError);
+      }
+
+      const sellText = 
+        `💱 **Sell ${asset}**\n\n` +
+        `💰 **Available:** ${assetBalance.total.toFixed(6)} ${asset}\n` +
+        `💵 **Current Price:** $${currentPrice.toFixed(6)}\n` +
+        `📊 **Total Value:** $${usdValue.toFixed(2)}\n\n` +
+        `🎯 **Choose sell amount:**`;
+
+      const keyboard = Markup.inlineKeyboard([
+        [
+          Markup.button.callback('25%', `spot_sell_${asset}_25pct`),
+          Markup.button.callback('50%', `spot_sell_${asset}_50pct`)
+        ],
+        [
+          Markup.button.callback('75%', `spot_sell_${asset}_75pct`),
+          Markup.button.callback('100%', `spot_sell_${asset}_100pct`)
+        ],
+        [
+          Markup.button.callback('🔄 Refresh', `spot_sell_${asset}`),
+          Markup.button.callback('🔙 Back', 'spot_sell_menu')
+        ]
+      ]);
+
+      await ctx.editMessageText(sellText, { parse_mode: 'Markdown', ...keyboard });
+
+    } catch (error) {
+      console.error(`[Orchestrator] Spot sell ${asset} error:`, error);
+      await ctx.reply(`❌ Failed to load ${asset} details. Please try again.`);
+    }
+  }
+
+  /**
+   * Execute spot asset sale
+   */
+  private async executeSpotSale(ctx: BotContext, asset: string, percentage: number): Promise<void> {
+    if (!ctx.userState?.isLinked) {
+      await ctx.reply('❌ Please link your API credentials first using /link');
+      return;
+    }
+
+    try {
+      await ctx.answerCbQuery(`🔄 Selling ${percentage}% of ${asset}...`);
+      
+      const processingMsg = await ctx.reply(
+        `🔄 **Processing Sell Order**\n\n` +
+        `**Asset:** ${asset}\n` +
+        `**Amount:** ${percentage}% of holdings\n\n` +
+        `⏳ Calculating quantity and executing...`,
+        { parse_mode: 'Markdown' }
+      );
+
+      const apiClient = await this.apiClientService.getOrCreateClient(ctx.userState.userId);
+      const SpotAccountService = await import('../services/SpotAccountService');
+      const spotService = new SpotAccountService.SpotAccountService(apiClient);
+      
+      // Get current balance
+      const assetBalance = await spotService.getAssetBalance(asset);
+      if (!assetBalance || assetBalance.total < 0.0001) {
+        throw new Error('Insufficient balance');
+      }
+
+      // Calculate quantity to sell
+      const sellQuantity = assetBalance.total * (percentage / 100);
+      const symbol = `${asset}USDT`;
+
+      // Format quantity with precision
+      const formattedQuantity = await this.formatQuantityWithPrecision(apiClient, symbol, sellQuantity);
+
+      // Execute sell order
+      const orderResult = await apiClient.createSpotOrder({
+        symbol,
+        side: 'SELL',
+        type: 'MARKET',
+        quantity: formattedQuantity
+      });
+
+      // Calculate proceeds
+      const executedQty = parseFloat(orderResult.executedQty);
+      const avgPrice = parseFloat(orderResult.avgPrice || '0');
+      const proceeds = executedQty * avgPrice;
+
+      // Success message
+      await ctx.telegram.editMessageText(
+        ctx.chat?.id,
+        processingMsg.message_id,
+        undefined,
+        `✅ **Sell Order Executed**\n\n` +
+        `**Asset:** ${asset}\n` +
+        `**Sold:** ${executedQty.toFixed(6)} ${asset}\n` +
+        `**Price:** $${avgPrice.toFixed(6)}\n` +
+        `**Proceeds:** ${proceeds.toFixed(2)} USDT\n` +
+        `**Order ID:** ${orderResult.orderId}\n\n` +
+        `💰 Sale completed successfully!\n\n` +
+        `🔙 Use /menu to return to main menu.`,
+        { parse_mode: 'Markdown' }
+      );
+
+      // Emit event
+      this.eventEmitter.emitEvent({
+        type: EventTypes.TRADE_EXECUTED,
+        timestamp: new Date(),
+        userId: ctx.userState.userId,
+        telegramId: ctx.userState.telegramId,
+        correlationId: ctx.correlationId,
+        symbol,
+        action: 'SELL',
+        amount: proceeds,
+        orderId: orderResult.orderId
+      });
+
+    } catch (error: any) {
+      console.error('Spot sell execution error:', error);
+      await ctx.reply(
+        `❌ **Sell Order Failed**\n\n` +
+        `**Asset:** ${asset}\n` +
+        `**Amount:** ${percentage}%\n` +
+        `**Error:** ${error.message || 'Unknown error'}\n\n` +
+        `🔄 Please try again or contact support.`,
+        { parse_mode: 'Markdown' }
+      );
+    }
+  }
+
+  /**
+   * Handle custom pair input functionality
+   */
+  private async handleCustomPairInput(ctx: BotContext, mode: 'spot' | 'perps'): Promise<void> {
+    const modeEmoji = mode === 'spot' ? '🏪' : '⚡';
+    const modeText = mode === 'spot' ? 'Spot' : 'Perps';
+    
+    await ctx.editMessageText(
+      `🎯 **Custom ${modeText} Trading Pair**\n\n` +
+      `✍️ Please type the trading pair symbol you want to trade:\n\n` +
+      `📝 **Examples:**\n` +
+      `• BTCUSDT\n` +
+      `• ETHUSDT\n` +
+      `• BNBUSDT\n` +
+      `• ADAUSDT\n\n` +
+      `💡 **Note:** Symbol must end with USDT\n\n` +
+      `⏳ Waiting for your input...`,
+      { 
+        parse_mode: 'Markdown',
+        ...Markup.inlineKeyboard([
+          [Markup.button.callback('🔙 Back', mode === 'spot' ? 'trade_spot' : 'trade_perps')]
+        ])
+      }
+    );
+
+    // Set conversation state to expect custom pair input
+    if (ctx.userState) {
+      (ctx.userState as any).expectingCustomPair = mode;
+    }
+  }
+
+  /**
+   * Handle custom pair text input
+   */
+  private async handleCustomPairText(ctx: BotContext, text: string): Promise<void> {
+    const mode = (ctx.userState as any)?.expectingCustomPair;
+    if (!mode) return;
+
+    // Clear conversation state
+    delete (ctx.userState as any).expectingCustomPair;
+
+    const symbol = text.toUpperCase().trim();
+    
+    // Validate symbol format
+    if (!/^[A-Z0-9]+USDT$/.test(symbol)) {
+      await ctx.reply(
+        `❌ **Invalid Symbol Format**\n\n` +
+        `**Entered:** ${text}\n` +
+        `**Required:** Symbol must end with USDT\n\n` +
+        `📝 **Examples:** BTCUSDT, ETHUSDT, BNBUSDT\n\n` +
+        `🔄 Please try again with /trade command.`,
+        { parse_mode: 'Markdown' }
+      );
+      return;
+    }
+
+    try {
+      // Validate symbol exists
+      const apiClient = await this.apiClientService.getOrCreateClient(ctx.userState!.userId);
+      
+      if (mode === 'spot') {
+        // Check if symbol exists in spot market
+        const tickers = await apiClient.getAllSpotTickers();
+        const symbolExists = tickers.some(t => t.symbol === symbol);
+        
+        if (!symbolExists) {
+          await this.handleSymbolNotFound(ctx, symbol, 'spot');
+          return;
+        }
+        
+        // Redirect to spot trading for this symbol
+        await this.tradingHandler.handleSpotSymbolTrading(ctx, symbol, 'BUY');
+      } else {
+        // Check if symbol exists in futures market
+        const ticker = await apiClient.get24hrTicker(symbol);
+        
+        if (!ticker) {
+          await this.handleSymbolNotFound(ctx, symbol, 'perps');
+          return;
+        }
+        
+        // Redirect to perps trading for this symbol
+        await this.tradingHandler.handlePerpsSymbolTrading(ctx, symbol, 'BUY');
+      }
+    } catch (error) {
+      console.error('Custom pair validation error:', error);
+      await this.handleSymbolNotFound(ctx, symbol, mode);
+    }
+  }
+
+  /**
+   * Handle when symbol is not found
+   */
+  private async handleSymbolNotFound(ctx: BotContext, symbol: string, mode: 'spot' | 'perps'): Promise<void> {
+    const modeText = mode === 'spot' ? 'Spot' : 'Perps';
+    
+    await ctx.reply(
+      `❌ **Symbol Not Found**\n\n` +
+      `**${symbol}** is not available for ${modeText} trading.\n\n` +
+      `💡 **Suggestions:**\n` +
+      `• Check spelling (must end with USDT)\n` +
+      `• Try popular pairs: BTCUSDT, ETHUSDT, BNBUSDT\n` +
+      `• Use the symbol buttons in trading menu\n\n` +
+      `🔄 Use /trade to return to trading menu.`,
+      { parse_mode: 'Markdown' }
+    );
   }
 
   /**
