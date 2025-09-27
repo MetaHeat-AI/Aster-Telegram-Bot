@@ -9,15 +9,10 @@ export interface PriceData {
 }
 
 export class PriceService {
-  private priceCache = new Map<string, PriceData>();
   private eventEmitter: BotEventEmitter;
-  private cacheExpiry: number = 30 * 1000; // 30 seconds
 
   constructor(eventEmitter: BotEventEmitter) {
     this.eventEmitter = eventEmitter;
-    
-    // Clean up expired prices periodically
-    setInterval(() => this.cleanupExpiredPrices(), 60 * 1000); // 1 minute
   }
 
   /**
@@ -27,21 +22,8 @@ export class PriceService {
     const startTime = Date.now();
     
     try {
-      // Check cache first
-      const cached = this.priceCache.get(symbol);
-      if (cached && this.isCacheValid(cached)) {
-        return cached.price;
-      }
-
-      // Fetch fresh price
+      // Fetch fresh price directly from API
       const price = await this.fetchPriceFromApi(symbol);
-      
-      // Update cache
-      this.priceCache.set(symbol, {
-        symbol,
-        price,
-        lastUpdated: new Date()
-      });
 
       this.eventEmitter.emitEvent({
         type: EventTypes.API_CALL_SUCCESS,
@@ -66,13 +48,6 @@ export class PriceService {
         success: false,
         duration: Date.now() - startTime
       });
-
-      // Return cached price if available, even if expired
-      const cached = this.priceCache.get(symbol);
-      if (cached) {
-        console.warn(`[PriceService] Using stale price for ${symbol}:`, cached.price);
-        return cached.price;
-      }
 
       throw new Error(`Failed to get price for ${symbol}: ${error instanceof Error ? error.message : 'Unknown error'}`);
     }
@@ -110,24 +85,6 @@ export class PriceService {
     return prices;
   }
 
-  /**
-   * Get cached price if available (no API call)
-   */
-  getCachedPrice(symbol: string): number | null {
-    const cached = this.priceCache.get(symbol);
-    return cached ? cached.price : null;
-  }
-
-  /**
-   * Clear cache for a specific symbol
-   */
-  clearCache(symbol?: string): void {
-    if (symbol) {
-      this.priceCache.delete(symbol);
-    } else {
-      this.priceCache.clear();
-    }
-  }
 
   /**
    * Fetch price from external API
@@ -154,26 +111,47 @@ export class PriceService {
     return price;
   }
 
-  /**
-   * Check if cached price is still valid
-   */
-  private isCacheValid(priceData: PriceData): boolean {
-    const now = Date.now();
-    const cacheTime = priceData.lastUpdated.getTime();
-    return (now - cacheTime) < this.cacheExpiry;
-  }
 
   /**
-   * Clean up expired prices from cache
+   * Get current prices for multiple symbols in parallel
+   * Significant performance improvement for multiple price queries
    */
-  private cleanupExpiredPrices(): void {
-    const now = Date.now();
-    const maxAge = 5 * 60 * 1000; // 5 minutes
+  async getCurrentPrices(symbols: string[]): Promise<Map<string, number>> {
+    const startTime = Date.now();
     
-    for (const [symbol, priceData] of this.priceCache.entries()) {
-      if (now - priceData.lastUpdated.getTime() > maxAge) {
-        this.priceCache.delete(symbol);
-      }
+    try {
+      const pricePromises = symbols.map(async symbol => {
+        try {
+          const price = await this.getCurrentPrice(symbol);
+          return [symbol, price] as [string, number];
+        } catch (error) {
+          console.error(`Failed to get price for ${symbol}:`, error);
+          return [symbol, 0] as [string, number];
+        }
+      });
+
+      const results = await Promise.all(pricePromises);
+      const priceMap = new Map(results);
+      
+      this.eventEmitter.emitEvent({
+        type: EventTypes.API_CALL_SUCCESS,
+        timestamp: new Date(),
+        userId: 0,
+        telegramId: 0,
+        endpoint: 'batch_price_fetch',
+        method: 'GET',
+        success: true,
+        duration: Date.now() - startTime
+      });
+
+      return priceMap;
+    } catch (error) {
+      console.error('Batch price fetch failed:', error);
+      
+      // Return empty map with all zeros as fallback
+      const fallbackMap = new Map<string, number>();
+      symbols.forEach(symbol => fallbackMap.set(symbol, 0));
+      return fallbackMap;
     }
   }
 }

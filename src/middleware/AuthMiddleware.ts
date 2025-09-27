@@ -11,14 +11,10 @@ export interface BotContext extends Context {
 export class AuthMiddleware {
   private db: DatabaseManager;
   private eventEmitter: BotEventEmitter;
-  private userStateCache = new Map<number, UserState>();
 
   constructor(db: DatabaseManager, eventEmitter: BotEventEmitter) {
     this.db = db;
     this.eventEmitter = eventEmitter;
-    
-    // Clean up cache periodically
-    setInterval(() => this.cleanupUserCache(), 10 * 60 * 1000); // 10 minutes
   }
 
   /**
@@ -94,17 +90,11 @@ export class AuthMiddleware {
   }
 
   /**
-   * Load user state from database or cache
+   * Load user state from database
    */
   private async loadUserState(telegramId: number): Promise<UserState | undefined> {
     try {
-      // Check cache first
-      const cached = this.userStateCache.get(telegramId);
-      if (cached && this.isCacheValid(cached)) {
-        return cached;
-      }
-
-      // Load from database
+      // Load from database - no caching for reliable data consistency
       let user = await this.db.getUserByTelegramId(telegramId);
       if (!user) {
         // Create new user
@@ -127,12 +117,6 @@ export class AuthMiddleware {
         rateLimitRemaining: 100, // Default rate limit
         // Add other fields as needed
       };
-
-      // Cache the user state
-      this.userStateCache.set(telegramId, {
-        ...userState,
-        lastUpdated: new Date()
-      } as UserState & { lastUpdated: Date });
 
       return userState;
     } catch (error) {
@@ -160,46 +144,4 @@ export class AuthMiddleware {
     return `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
   }
 
-  /**
-   * Check if cached user state is still valid
-   */
-  private isCacheValid(userState: UserState & { lastUpdated?: Date }): boolean {
-    if (!userState.lastUpdated) return false;
-    
-    const maxAge = 5 * 60 * 1000; // 5 minutes
-    const age = Date.now() - userState.lastUpdated.getTime();
-    return age < maxAge;
-  }
-
-  /**
-   * Clean up expired user state cache
-   */
-  private cleanupUserCache(): void {
-    const now = Date.now();
-    const maxAge = 15 * 60 * 1000; // 15 minutes
-    
-    for (const [telegramId, userState] of this.userStateCache.entries()) {
-      const lastUpdated = (userState as any).lastUpdated as Date;
-      if (lastUpdated && now - lastUpdated.getTime() > maxAge) {
-        this.userStateCache.delete(telegramId);
-      }
-    }
-  }
-
-  /**
-   * Invalidate user cache (e.g., when user links/unlinks account)
-   */
-  invalidateUserCache(telegramId: number): void {
-    this.userStateCache.delete(telegramId);
-  }
-
-  /**
-   * Get cache statistics for monitoring
-   */
-  getCacheStats(): { size: number; hitRate?: number } {
-    return {
-      size: this.userStateCache.size
-      // Add hit rate tracking if needed
-    };
-  }
 }

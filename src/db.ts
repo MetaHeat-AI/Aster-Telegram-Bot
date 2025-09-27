@@ -1,18 +1,16 @@
 import { Pool, PoolClient, QueryResult } from 'pg';
-import { createClient, RedisClientType } from 'redis';
 import { 
   User, 
   ApiCredentials, 
   UserSettings, 
-  UserSession, 
+ 
   Order 
 } from './types';
 
 export class DatabaseManager {
   private pool: Pool;
-  private redis?: RedisClientType;
 
-  constructor(databaseUrl: string, redisUrl?: string) {
+  constructor(databaseUrl: string) {
     this.pool = new Pool({
       connectionString: databaseUrl,
       ssl: process.env.NODE_ENV === 'production' ? { rejectUnauthorized: false } : false,
@@ -21,22 +19,6 @@ export class DatabaseManager {
       connectionTimeoutMillis: 2000,
     });
 
-    if (redisUrl && redisUrl.startsWith('redis://') && !redisUrl.includes('localhost:6379')) {
-      try {
-        this.redis = createClient({
-          url: redisUrl,
-          socket: {
-            connectTimeout: 5000,
-            reconnectStrategy: false, // Disable automatic reconnection
-          }
-        }) as RedisClientType;
-      } catch (error) {
-        console.warn('[Redis] Failed to create client, continuing without Redis:', error);
-        this.redis = undefined;
-      }
-    } else {
-      console.log('[Redis] URL not provided or localhost detected, Redis disabled');
-    }
 
     this.setupEventHandlers();
   }
@@ -49,26 +31,11 @@ export class DatabaseManager {
     this.pool.on('error', (err) => {
       console.error('[DB] PostgreSQL error:', err);
     });
-
-    if (this.redis) {
-      this.redis.on('connect', () => {
-        console.log('[Redis] Connected');
-      });
-
-      this.redis.on('error', (err) => {
-        console.error('[Redis] Error:', err);
-      });
-    }
   }
 
   async connect(): Promise<void> {
     try {
-      if (this.redis) {
-        await this.redis.connect();
-        console.log('[Redis] Connected successfully');
-      } else {
-        console.log('[Redis] Not configured, skipping Redis connection');
-      }
+      console.log('[Redis] Not configured, skipping Redis connection');
       await this.pool.connect();
       console.log('[DB] Database connections established');
     } catch (error) {
@@ -79,9 +46,6 @@ export class DatabaseManager {
 
   async disconnect(): Promise<void> {
     try {
-      if (this.redis) {
-        await this.redis.disconnect();
-      }
       await this.pool.end();
       console.log('[DB] Database connections closed');
     } catch (error) {
@@ -142,20 +106,6 @@ export class DatabaseManager {
         CREATE INDEX IF NOT EXISTS idx_settings_user_id ON settings(user_id);
       `);
 
-      // Create sessions table
-      await client.query(`
-        CREATE TABLE IF NOT EXISTS sessions (
-          id SERIAL PRIMARY KEY,
-          user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
-          listen_key TEXT NOT NULL,
-          listen_key_expires_at TIMESTAMP WITH TIME ZONE NOT NULL,
-          created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-          UNIQUE(user_id)
-        );
-        
-        CREATE INDEX IF NOT EXISTS idx_sessions_user_id ON sessions(user_id);
-        CREATE INDEX IF NOT EXISTS idx_sessions_expires_at ON sessions(listen_key_expires_at);
-      `);
 
       // Create orders table
       await client.query(`
@@ -327,37 +277,6 @@ export class DatabaseManager {
     await this.pool.query(query, values);
   }
 
-  // ========== Session Management ==========
-
-  async storeSession(userId: number, listenKey: string, expiresAt: Date): Promise<void> {
-    const query = `
-      INSERT INTO sessions (user_id, listen_key, listen_key_expires_at)
-      VALUES ($1, $2, $3)
-      ON CONFLICT (user_id)
-      DO UPDATE SET
-        listen_key = EXCLUDED.listen_key,
-        listen_key_expires_at = EXCLUDED.listen_key_expires_at
-    `;
-    
-    await this.pool.query(query, [userId, listenKey, expiresAt]);
-  }
-
-  async getSession(userId: number): Promise<UserSession | null> {
-    const query = 'SELECT * FROM sessions WHERE user_id = $1';
-    const result = await this.pool.query(query, [userId]);
-    return result.rows[0] || null;
-  }
-
-  async removeSession(userId: number): Promise<void> {
-    const query = 'DELETE FROM sessions WHERE user_id = $1';
-    await this.pool.query(query, [userId]);
-  }
-
-  async getExpiredSessions(): Promise<UserSession[]> {
-    const query = 'SELECT * FROM sessions WHERE listen_key_expires_at < NOW()';
-    const result = await this.pool.query(query);
-    return result.rows;
-  }
 
   // ========== Order Tracking ==========
 
@@ -440,64 +359,6 @@ export class DatabaseManager {
     await this.pool.query(query, [userId, targetDate]);
   }
 
-  // ========== Redis Operations ==========
-
-  async setCache(key: string, value: string, ttlSeconds?: number): Promise<void> {
-    if (!this.redis) {
-      console.warn('[Redis] Not available, skipping cache set');
-      return;
-    }
-    if (ttlSeconds) {
-      await this.redis.setEx(key, ttlSeconds, value);
-    } else {
-      await this.redis.set(key, value);
-    }
-  }
-
-  async getCache(key: string): Promise<string | null> {
-    if (!this.redis) {
-      console.warn('[Redis] Not available, returning null for cache get');
-      return null;
-    }
-    return await this.redis.get(key);
-  }
-
-  async deleteCache(key: string): Promise<void> {
-    if (!this.redis) {
-      console.warn('[Redis] Not available, skipping cache delete');
-      return;
-    }
-    await this.redis.del(key);
-  }
-
-  async incrementRate(key: string, windowSeconds: number): Promise<number> {
-    if (!this.redis) {
-      console.warn('[Redis] Not available, returning 0 for rate limit');
-      return 0;
-    }
-    const multi = this.redis.multi();
-    multi.incr(key);
-    multi.expire(key, windowSeconds);
-    const results = await multi.exec();
-    return results?.[0] as number || 0;
-  }
-
-  async checkIdempotency(key: string): Promise<boolean> {
-    if (!this.redis) {
-      console.warn('[Redis] Not available, allowing duplicate for idempotency');
-      return false;
-    }
-    const exists = await this.redis.exists(key);
-    return exists === 1;
-  }
-
-  async setIdempotencyKey(key: string, ttlSeconds = 300): Promise<void> {
-    if (!this.redis) {
-      console.warn('[Redis] Not available, skipping idempotency key set');
-      return;
-    }
-    await this.redis.setEx(key, ttlSeconds, 'processed');
-  }
 
   // ========== Conversation State Management ==========
 
@@ -561,38 +422,23 @@ export class DatabaseManager {
 
   // ========== Health Checks ==========
 
-  async healthCheck(): Promise<{ postgres: boolean; redis: boolean }> {
+  async healthCheck(): Promise<{ postgres: boolean }> {
     try {
       const pgResult = await this.pool.query('SELECT 1');
-      let redisHealthy = false;
-      
-      if (this.redis) {
-        const redisResult = await this.redis.ping();
-        redisHealthy = redisResult === 'PONG';
-      } else {
-        redisHealthy = true; // Consider healthy if not configured
-      }
       
       return {
         postgres: pgResult.rows[0]['?column?'] === 1,
-        redis: redisHealthy,
       };
     } catch (error) {
       console.error('[DB] Health check failed:', error);
       return {
         postgres: false,
-        redis: false,
       };
     }
   }
 
   // ========== Cleanup Operations ==========
 
-  async cleanupExpiredSessions(): Promise<number> {
-    const query = 'DELETE FROM sessions WHERE listen_key_expires_at < NOW()';
-    const result = await this.pool.query(query);
-    return result.rowCount || 0;
-  }
 
   async cleanupOldOrders(daysOld = 30): Promise<number> {
     const query = 'DELETE FROM orders WHERE created_at < NOW() - INTERVAL \'$1 days\'';

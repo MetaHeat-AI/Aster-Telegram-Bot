@@ -12,22 +12,13 @@ export interface SymbolData {
 
 export class SymbolService {
   private apiClient: AsterApiClient;
-  private symbolCache: Map<string, SymbolData> = new Map();
-  private lastCacheUpdate: number = 0;
-  private readonly CACHE_TTL = 5 * 60 * 1000; // 5 minutes
 
   constructor(apiClient: AsterApiClient) {
     this.apiClient = apiClient;
   }
 
   async getAvailableSymbols(): Promise<SymbolData[]> {
-    // Check cache first
-    if (this.isCacheValid()) {
-      return Array.from(this.symbolCache.values());
-    }
-
-    await this.refreshSymbolCache();
-    return Array.from(this.symbolCache.values());
+    return await this.fetchSymbolData();
   }
 
   async getTopSymbolsByVolume(count: number = 10, type: 'spot' | 'futures' | 'both' = 'both'): Promise<SymbolData[]> {
@@ -39,7 +30,7 @@ export class SymbolService {
     }
 
     // For 'both', use combined data
-    const symbols = await this.getAvailableSymbols();
+    const symbols = await this.fetchSymbolData();
     const usdtPairs = symbols.filter(s => s.symbol.endsWith('USDT'));
     
     // Sort by quote volume (trading volume in USDT)
@@ -107,12 +98,7 @@ export class SymbolService {
 
     } catch (error) {
       console.error('[SymbolService] Failed to get top spot symbols:', error);
-      // Fallback to cached data
-      const symbols = await this.getAvailableSymbols();
-      return symbols
-        .filter(s => s.isSpotAvailable && s.symbol.endsWith('USDT'))
-        .sort((a, b) => parseFloat(b.quoteVolume || '0') - parseFloat(a.quoteVolume || '0'))
-        .slice(0, count);
+      throw error;
     }
   }
 
@@ -159,17 +145,12 @@ export class SymbolService {
 
     } catch (error) {
       console.error('[SymbolService] Failed to get top futures symbols:', error);
-      // Fallback to cached data
-      const symbols = await this.getAvailableSymbols();
-      return symbols
-        .filter(s => s.isFuturesAvailable && s.symbol.endsWith('USDT'))
-        .sort((a, b) => parseFloat(b.quoteVolume || '0') - parseFloat(a.quoteVolume || '0'))
-        .slice(0, count);
+      throw error;
     }
   }
 
   async getSpotSymbols(limit?: number): Promise<SymbolData[]> {
-    const symbols = await this.getAvailableSymbols();
+    const symbols = await this.fetchSymbolData();
     const spotSymbols = symbols.filter(s => s.isSpotAvailable && s.symbol.endsWith('USDT'));
     
     if (limit) {
@@ -179,7 +160,7 @@ export class SymbolService {
   }
 
   async getFuturesSymbols(limit?: number): Promise<SymbolData[]> {
-    const symbols = await this.getAvailableSymbols();
+    const symbols = await this.fetchSymbolData();
     const futuresSymbols = symbols.filter(s => s.isFuturesAvailable && s.symbol.endsWith('USDT'));
     
     if (limit) {
@@ -189,7 +170,7 @@ export class SymbolService {
   }
 
   async isSymbolAvailable(symbol: string, type: 'spot' | 'futures'): Promise<boolean> {
-    const symbols = await this.getAvailableSymbols();
+    const symbols = await this.fetchSymbolData();
     const symbolData = symbols.find(s => s.symbol === symbol);
     
     if (!symbolData) return false;
@@ -197,9 +178,9 @@ export class SymbolService {
     return type === 'spot' ? symbolData.isSpotAvailable : symbolData.isFuturesAvailable;
   }
 
-  private async refreshSymbolCache(): Promise<void> {
+  private async fetchSymbolData(): Promise<SymbolData[]> {
     try {
-      console.log('[SymbolService] Refreshing symbol cache...');
+      console.log('[SymbolService] Fetching symbol data...');
       
       // Get data from both spot and futures APIs
       const [spotTickers, futuresTickers, spotExchangeInfo, futuresExchangeInfo] = await Promise.all([
@@ -227,7 +208,7 @@ export class SymbolService {
       spotTickers.forEach(t => allSymbols.add(t.symbol));
       futuresTickers.forEach(t => allSymbols.add(t.symbol));
 
-      this.symbolCache.clear();
+      const symbolDataArray: SymbolData[] = [];
 
       for (const symbol of allSymbols) {
         const spotData = spotTickers.find(t => t.symbol === symbol);
@@ -262,15 +243,15 @@ export class SymbolService {
           isFuturesAvailable: futuresSymbols.has(symbol)
         };
 
-        this.symbolCache.set(symbol, symbolData);
+        symbolDataArray.push(symbolData);
       }
 
-      this.lastCacheUpdate = Date.now();
-      console.log(`[SymbolService] Cache refreshed with ${this.symbolCache.size} symbols`);
+      console.log(`[SymbolService] Fetched ${symbolDataArray.length} symbols`);
+      return symbolDataArray;
       
     } catch (error) {
-      console.error('[SymbolService] Failed to refresh symbol cache:', error);
-      // Keep existing cache if refresh fails
+      console.error('[SymbolService] Failed to fetch symbol data:', error);
+      throw error;
     }
   }
 
@@ -292,12 +273,6 @@ export class SymbolService {
     }
   }
 
-  private isCacheValid(): boolean {
-    return (
-      this.symbolCache.size > 0 &&
-      Date.now() - this.lastCacheUpdate < this.CACHE_TTL
-    );
-  }
 
   // Helper method to get popular symbols with emojis
   getSymbolEmoji(symbol: string): string {

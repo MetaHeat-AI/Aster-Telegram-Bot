@@ -31,6 +31,7 @@ export class BotOrchestrator {
   // Services
   private apiClientService!: ApiClientService;
   private priceService!: PriceService;
+  private publicApiClient!: any;
   
   // Handlers
   private navigationHandler!: NavigationHandler;
@@ -51,7 +52,7 @@ export class BotOrchestrator {
    * Initialize core infrastructure
    */
   private initializeCore(): void {
-    this.db = new DatabaseManager(this.config.database.url, this.config.redis?.url);
+    this.db = new DatabaseManager(this.config.database.url);
     this.encryption = new EncryptionManager(this.config.encryption.key);
     this.eventEmitter = new BotEventEmitter();
     
@@ -75,6 +76,27 @@ export class BotOrchestrator {
     this.priceService = new PriceService(this.eventEmitter);
     
     console.log('[Orchestrator] Business services initialized');
+  }
+
+  /**
+   * Initialize public API client (async component)
+   */
+  private async initializePublicApiClient(): Promise<void> {
+    try {
+      const AsterApiClient = await import('../aster');
+      this.publicApiClient = new AsterApiClient.AsterApiClient('https://api.aster.exchange', '', '');
+      console.log('[Orchestrator] Public API client initialized');
+    } catch (error) {
+      console.error('[Orchestrator] CRITICAL: Failed to initialize public API client:', error);
+      throw new Error(`Failed to initialize public API client: ${error instanceof Error ? error.message : 'Unknown error'}`);
+    }
+  }
+
+  /**
+   * Initialize async components after construction
+   */
+  async initialize(): Promise<void> {
+    await this.initializePublicApiClient();
   }
 
   /**
@@ -154,16 +176,16 @@ export class BotOrchestrator {
         status: 'healthy',
         timestamp: new Date().toISOString(),
         uptime: process.uptime(),
-        clients: this.apiClientService.getClientCount(),
-        auth_cache: this.authMiddleware.getCacheStats()
+        clients: 0, // No session caching after horizontal scaling optimization
+        auth_cache: { status: 'disabled', reason: 'caching removed for data consistency' }
       });
     });
     
     // Metrics endpoint
     this.server.get('/metrics', (req, res) => {
       res.json({
-        api_clients: this.apiClientService.getClientCount(),
-        auth_cache: this.authMiddleware.getCacheStats(),
+        api_clients: 0, // No session caching after horizontal scaling optimization
+        auth_cache: { status: 'disabled', reason: 'caching removed for data consistency' },
         // Add more metrics as needed
       });
     });
@@ -433,6 +455,26 @@ export class BotOrchestrator {
       this.handlePositionAction(ctx, action, symbol);
     });
 
+    // Refresh position P&L handler
+    this.bot.action(/^refresh_position_(.+)$/, (ctx) => {
+      const symbol = ctx.match[1];
+      this.handleRefreshPosition(ctx, symbol);
+    });
+
+    // Spot sell percentage handlers
+    this.bot.action(/^spot_sell_(\d+)_(.+)$/, (ctx) => {
+      const percentage = parseInt(ctx.match[1]);
+      const symbol = ctx.match[2];
+      this.handleSpotSellPercentage(ctx, symbol, percentage);
+    });
+
+    // Spot confirm sell handler
+    this.bot.action(/^spot_confirm_sell_(.+)_(.+)$/, (ctx) => {
+      const quantity = ctx.match[1];
+      const symbol = ctx.match[2];
+      this.handleSpotConfirmSell(ctx, symbol, parseFloat(quantity));
+    });
+
     // Quick trading handlers
     this.bot.action(/^quick_trade_(.+)$/, (ctx) => {
       const symbol = ctx.match[1];
@@ -673,6 +715,9 @@ export class BotOrchestrator {
    */
   async start(): Promise<void> {
     try {
+      // Initialize async components first
+      await this.initialize();
+      
       // Initialize database
       await this.db.connect();
       await this.db.initializeSchema();
@@ -809,20 +854,19 @@ export class BotOrchestrator {
           quoteOrderQty: amount.toString() // ← Use original approach: direct USDT amount
         });
 
-        // Success message
-        await ctx.telegram.editMessageText(
-          ctx.chat?.id,
-          processingMsg.message_id,
-          undefined,
-          `✅ **Spot ${action} Order Executed**\n\n` +
-          `**Symbol:** ${symbol}\n` +
-          `**Amount:** $${amount}\n` +
-          `**Quantity:** ${orderResult.executedQty}\n` +
-          `**Avg Price:** $${orderResult.avgPrice || 'N/A'}\n` +
-          `**Order ID:** ${orderResult.orderId}\n\n` +
-          `🎉 Trade completed successfully!\n\n` +
-          `🔙 Use /menu to return to main menu.`,
-          { parse_mode: 'Markdown' }
+        // Enhanced success message with position management
+        const executedPrice = parseFloat(orderResult.avgPrice || orderResult.fills?.[0]?.price || '0');
+        await this.showExecutionSuccessWithPositionManagement(
+          ctx, 
+          processingMsg.message_id, 
+          'spot', 
+          symbol, 
+          action, 
+          amount, 
+          undefined, 
+          amount, 
+          executedPrice, 
+          String(orderResult.orderId)
         );
 
         this.eventEmitter.emitEvent({
@@ -834,7 +878,7 @@ export class BotOrchestrator {
           symbol,
           action: side,
           amount,
-          orderId: orderResult.orderId
+          orderId: String(orderResult.orderId)
         });
 
       } catch (tradeError: any) {
@@ -935,21 +979,18 @@ export class BotOrchestrator {
         const executedQuantity = parseFloat(orderResult.executedQty);
         const positionSizeUSDT = executedQuantity * executedPrice;
 
-        // Success message
-        await ctx.telegram.editMessageText(
-          ctx.chat?.id,
-          processingMsg.message_id,
-          undefined,
-          `✅ **Perps ${action} Order Executed**\n\n` +
-          `**Symbol:** ${symbol}\n` +
-          `**Margin:** $${amount}\n` +
-          `**Leverage:** ${leverage}x\n` +
-          `**Position Size:** ${positionSizeUSDT.toFixed(2)} USDT\n` +
-          `**Entry Price:** $${executedPrice.toFixed(6)}\n` +
-          `**Order ID:** ${orderResult.orderId}\n\n` +
-          `🎉 Position opened successfully!\n\n` +
-          `🔙 Use /menu to return to main menu.`,
-          { parse_mode: 'Markdown' }
+        // Enhanced success message with position management
+        await this.showExecutionSuccessWithPositionManagement(
+          ctx, 
+          processingMsg.message_id, 
+          'perps', 
+          symbol, 
+          action, 
+          amount, 
+          leverage, 
+          positionSizeUSDT, 
+          executedPrice, 
+          String(orderResult.orderId)
         );
 
         this.eventEmitter.emitEvent({
@@ -962,7 +1003,7 @@ export class BotOrchestrator {
           action: side,
           amount,
           leverage,
-          orderId: orderResult.orderId
+          orderId: String(orderResult.orderId)
         });
 
       } catch (tradeError: any) {
@@ -1434,6 +1475,135 @@ Contact @AsterDEX\\_Support or visit docs.aster.exchange for detailed guides.
     } catch (error) {
       console.error('Position management menu error:', error);
       await ctx.reply('❌ Failed to load position details. Please try again.');
+    }
+  }
+
+  /**
+   * Show enhanced execution success message with position management interface
+   */
+  private async showExecutionSuccessWithPositionManagement(
+    ctx: BotContext, 
+    messageId: number,
+    type: 'spot' | 'perps',
+    symbol: string, 
+    action: string,
+    amount: number,
+    leverage?: number,
+    positionSizeUSDT?: number,
+    executedPrice?: number,
+    orderId?: string
+  ): Promise<void> {
+    try {
+      const apiClient = await this.apiClientService.getOrCreateClient(ctx.userState!.userId);
+      
+      // Get current position/balance info
+      let positionInfo = '';
+      let managementButtons: any[] = [];
+      
+      if (type === 'perps') {
+        // Get current perp position
+        const positions = await apiClient.getPositionRisk();
+        const position = positions.find((p: any) => p.symbol === symbol && parseFloat(p.positionAmt) !== 0);
+        
+        if (position) {
+          const positionAmt = parseFloat(position.positionAmt);
+          const side = positionAmt > 0 ? 'LONG' : 'SHORT';
+          const pnl = parseFloat(position.unrealizedPnl) || 0;
+          const pnlEmoji = pnl >= 0 ? '🟢' : '🔴';
+          const sideEmoji = side === 'LONG' ? '🟢' : '🔴';
+          
+          positionInfo = [
+            '',
+            '📊 **Current Position Status:**',
+            `${sideEmoji} **${side}** ${Math.abs(positionAmt).toFixed(4)} ${symbol.replace('USDT', '')}`,
+            `💰 **Entry Price:** $${position.entryPrice}`,
+            `⚡ **Leverage:** ${position.leverage}x`,
+            `${pnlEmoji} **Unrealized P&L:** ${pnl >= 0 ? '+' : ''}$${pnl.toFixed(2)}`,
+            `📈 **Current Value:** $${(Math.abs(positionAmt) * parseFloat(position.entryPrice)).toFixed(2)}`
+          ].join('\n');
+          
+          managementButtons = [
+            [
+              Markup.button.callback('🔴 Close 25%', `position_close_25_${symbol}`),
+              Markup.button.callback('🔴 Close 50%', `position_close_50_${symbol}`)
+            ],
+            [
+              Markup.button.callback('🔴 Close 75%', `position_close_75_${symbol}`),
+              Markup.button.callback('🔴 Close All', `position_close_${symbol}`)
+            ]
+          ];
+        }
+      } else {
+        // Spot balance display simplified for now until full spot API is available
+        positionInfo = [
+          '',
+          '💼 **Spot Trade Completed**',
+          `✅ Order executed successfully`,
+          `📊 View your balances in the main menu`
+        ].join('\n');
+        
+        managementButtons = [
+          [
+            Markup.button.callback('💰 View Balance', 'balance'),
+            Markup.button.callback('📈 Trade Again', 'trade_spot')
+          ]
+        ];
+      }
+      
+      // Create success message
+      const actionEmoji = action.toLowerCase().includes('buy') || action.toLowerCase().includes('long') ? '🟢' : '🔴';
+      const typeLabel = type === 'perps' ? 'Futures' : 'Spot';
+      
+      let successText = [
+        `✅ **${typeLabel} ${action} Order Executed Successfully!**`,
+        '',
+        `${actionEmoji} **Symbol:** ${symbol}`,
+        `💰 **Amount:** $${(positionSizeUSDT || amount).toFixed(2)}`,
+        leverage ? `⚡ **Leverage:** ${leverage}x` : '',
+        executedPrice ? `💱 **Executed Price:** $${executedPrice.toFixed(4)}` : '',
+        orderId ? `🔗 **Order ID:** \`${orderId}\`` : ''
+      ].filter(line => line !== '').join('\n');
+      
+      // Add position info if available
+      if (positionInfo) {
+        successText += positionInfo;
+      }
+      
+      // Create keyboard with management options
+      const keyboard = Markup.inlineKeyboard([
+        ...managementButtons,
+        [
+          Markup.button.callback('🔄 Refresh P&L', `refresh_position_${symbol}`),
+          Markup.button.callback('📊 View All Positions', 'positions')
+        ],
+        [
+          Markup.button.callback('📈 Trade Again', type === 'perps' ? 'trade_perps' : 'trade_spot'),
+          Markup.button.callback('🏠 Main Menu', 'main_menu')
+        ]
+      ]);
+      
+      await ctx.editMessageText(successText, { 
+        parse_mode: 'Markdown', 
+        ...keyboard 
+      });
+      
+    } catch (error) {
+      console.error('Error showing execution success with position management:', error);
+      // Fallback to simple success message
+      const actionEmoji = action.toLowerCase().includes('buy') || action.toLowerCase().includes('long') ? '🟢' : '🔴';
+      const typeLabel = type === 'perps' ? 'Futures' : 'Spot';
+      
+      const fallbackText = [
+        `✅ **${typeLabel} ${action} Order Executed!**`,
+        '',
+        `${actionEmoji} **Symbol:** ${symbol}`,
+        `💰 **Amount:** $${(positionSizeUSDT || amount).toFixed(2)}`,
+        leverage ? `⚡ **Leverage:** ${leverage}x` : '',
+        '',
+        'Use /menu to continue trading'
+      ].filter(line => line !== '').join('\n');
+      
+      await ctx.editMessageText(fallbackText, { parse_mode: 'Markdown' });
     }
   }
 
@@ -3120,7 +3290,7 @@ Contact @AsterDEX\\_Support or visit docs.aster.exchange for detailed guides.
         `**Sold:** ${executedQty.toFixed(6)} ${asset}\n` +
         `**Price:** $${avgPrice.toFixed(6)}\n` +
         `**Proceeds:** ${proceeds.toFixed(2)} USDT\n` +
-        `**Order ID:** ${orderResult.orderId}\n\n` +
+        `**Order ID:** ${String(orderResult.orderId)}\n\n` +
         `💰 Sale completed successfully!\n\n` +
         `🔙 Use /menu to return to main menu.`,
         { parse_mode: 'Markdown' }
@@ -3524,14 +3694,20 @@ Contact @AsterDEX\\_Support or visit docs.aster.exchange for detailed guides.
         
         try {
           const tpSide = side === 'BUY' ? 'SELL' : 'BUY';
-          tpOrderResult = await apiClient.futuresOrder({
-            symbol,
-            side: tpSide,
-            type: 'TAKE_PROFIT_MARKET',
-            stopPrice: tpPrice.toString(),
-            quantity: position.size.toString(),
-            timeInForce: 'GTC'
-          });
+          
+          // Use createOrder for take profit orders
+          try {
+            tpOrderResult = await apiClient.createOrder({
+              symbol,
+              side: tpSide,
+              type: 'TAKE_PROFIT_MARKET',
+              stopPrice: tpPrice.toString(),
+              quantity: position.size.toString(),
+              timeInForce: 'GTC'
+            });
+          } catch (tpError) {
+            console.error('Take profit order placement failed:', tpError);
+          }
         } catch (error) {
           console.error('TP order placement error:', error);
         }
@@ -3545,14 +3721,20 @@ Contact @AsterDEX\\_Support or visit docs.aster.exchange for detailed guides.
         
         try {
           const slSide = side === 'BUY' ? 'SELL' : 'BUY';
-          slOrderResult = await apiClient.futuresOrder({
-            symbol,
-            side: slSide,
-            type: 'STOP_MARKET',
-            stopPrice: slPrice.toString(),
-            quantity: position.size.toString(),
-            timeInForce: 'GTC'
-          });
+          
+          // Use createOrder for stop loss orders
+          try {
+            slOrderResult = await apiClient.createOrder({
+              symbol,
+              side: slSide,
+              type: 'STOP_MARKET',
+              stopPrice: slPrice.toString(),
+              quantity: position.size.toString(),
+              timeInForce: 'GTC'
+            });
+          } catch (slError) {
+            console.error('Stop loss order placement failed:', slError);
+          }
         } catch (error) {
           console.error('SL order placement error:', error);
         }
@@ -3776,36 +3958,19 @@ Contact @AsterDEX\\_Support or visit docs.aster.exchange for detailed guides.
       // Execute the transfer
       const transferType = direction === 'spot_to_futures' ? 'MAIN_UMFUTURE' : 'UMFUTURE_MAIN';
       
+      // Note: Transfer functionality not implemented yet
+      await ctx.editMessageText('⚠️ Transfer functionality is not yet implemented in this version.');
+      return;
+      
+      /* TODO: Implement transfer functionality
       const result = await apiClient.transfer({
         type: transferType,
         asset: 'USDT',
         amount: finalAmount.toString()
       });
 
-      const confirmText = [
-        `✅ **Transfer Successful**`,
-        '',
-        `${emoji} **${fromAccount} → ${toAccount}**`,
-        `💰 **Amount:** $${finalAmount.toFixed(2)} USDT`,
-        `🆔 **Transfer ID:** ${result.tranId || 'N/A'}`,
-        '',
-        '🔄 **Balance Updated**',
-        'Your account balances have been updated immediately.',
-        '',
-        '📊 Use /balance to view updated balances or check the transfer menu for current allocation.'
-      ].join('\n');
-
-      const keyboard = Markup.inlineKeyboard([
-        [
-          Markup.button.callback('🔄 Transfer More', 'transfer_menu'),
-          Markup.button.callback('📊 Check Balance', 'balance')
-        ],
-        [
-          Markup.button.callback('🔙 Back to Main Menu', 'main_menu')
-        ]
-      ]);
-
-      await ctx.editMessageText(confirmText, { parse_mode: 'Markdown', ...keyboard });
+      // TODO: Add success handling when transfer is implemented
+      */
 
     } catch (error) {
       console.error('Transfer execution error:', error);
@@ -3823,9 +3988,26 @@ Contact @AsterDEX\\_Support or visit docs.aster.exchange for detailed guides.
     const emoji = direction === 'spot_to_futures' ? '🏪➡️⚡' : '⚡➡️🏪';
 
     // Set up conversation state for manual input
-    if (!ctx.userState) ctx.userState = { userId: 0, telegramId: 0, isLinked: false };
+    if (!ctx.userState) {
+      ctx.userState = { 
+        userId: 0, 
+        telegramId: 0, 
+        isLinked: false,
+        settings: {
+          user_id: 0,
+          leverage_cap: 100,
+          default_leverage: 10,
+          size_presets: [25, 50, 100],
+          slippage_bps: 50,
+          tp_presets: [5, 10, 15],
+          sl_presets: [5, 10, 15],
+          daily_loss_cap: 500,
+          pin_hash: null
+        }
+      };
+    }
     ctx.userState.awaitingInput = 'transfer_amount';
-    ctx.userState.inputContext = { direction };
+    ctx.userState.inputContext = { type: 'transfer_amount', direction };
 
     await ctx.editMessageText(
       `${emoji} **Transfer ${fromAccount} → ${toAccount}**\n\n` +
@@ -3898,6 +4080,183 @@ Contact @AsterDEX\\_Support or visit docs.aster.exchange for detailed guides.
 
     // Execute the transfer
     await this.handleTransferExecute(ctx, direction, amount, 'usdt');
+  }
+
+  /**
+   * Handle refresh position P&L - updates the current position display
+   */
+  private async handleRefreshPosition(ctx: BotContext, symbol: string): Promise<void> {
+    try {
+      if (!ctx.userState?.isLinked) {
+        await ctx.reply('❌ Please link your API credentials first using /link');
+        return;
+      }
+
+      const apiClient = await this.apiClientService.getOrCreateClient(ctx.userState.userId);
+      
+      // Get fresh position data
+      const positions = await apiClient.getPositionRisk();
+      const position = positions.find((p: any) => p.symbol === symbol && parseFloat(p.positionAmt) !== 0);
+      
+      if (!position) {
+        await ctx.editMessageText('❌ No open position found for this symbol', { parse_mode: 'Markdown' });
+        return;
+      }
+
+      const positionAmt = parseFloat(position.positionAmt);
+      const side = positionAmt > 0 ? 'LONG' : 'SHORT';
+      const pnl = parseFloat(position.unrealizedPnl) || 0;
+      const pnlEmoji = pnl >= 0 ? '🟢' : '🔴';
+      const sideEmoji = side === 'LONG' ? '🟢' : '🔴';
+      const currentValue = Math.abs(positionAmt) * parseFloat(position.entryPrice);
+
+      const refreshedText = [
+        `🔄 **Refreshed Position Status**`,
+        '',
+        `${sideEmoji} **${side}** ${Math.abs(positionAmt).toFixed(4)} ${symbol.replace('USDT', '')}`,
+        `💰 **Entry Price:** $${position.entryPrice}`,
+        `📊 **Current Price:** $${position.entryPrice}`,
+        `⚡ **Leverage:** ${position.leverage}x`,
+        `${pnlEmoji} **Unrealized P&L:** ${pnl >= 0 ? '+' : ''}$${pnl.toFixed(2)}`,
+        `📈 **Current Value:** $${currentValue.toFixed(2)}`,
+        '',
+        `*Last updated: ${new Date().toLocaleTimeString()}*`
+      ].join('\n');
+
+      const keyboard = Markup.inlineKeyboard([
+        [
+          Markup.button.callback('🔴 Close 25%', `position_close_25_${symbol}`),
+          Markup.button.callback('🔴 Close 50%', `position_close_50_${symbol}`)
+        ],
+        [
+          Markup.button.callback('🔴 Close 75%', `position_close_75_${symbol}`),
+          Markup.button.callback('🔴 Close All', `position_close_${symbol}`)
+        ],
+        [
+          Markup.button.callback('🔄 Refresh Again', `refresh_position_${symbol}`),
+          Markup.button.callback('📊 All Positions', 'positions')
+        ],
+        [
+          Markup.button.callback('📈 Trade Again', 'trade_perps'),
+          Markup.button.callback('🏠 Main Menu', 'main_menu')
+        ]
+      ]);
+
+      await ctx.editMessageText(refreshedText, { parse_mode: 'Markdown', ...keyboard });
+    } catch (error) {
+      console.error('Refresh position error:', error);
+      await ctx.reply('❌ Failed to refresh position data. Please try again.');
+    }
+  }
+
+  /**
+   * Handle spot sell percentage - sells a percentage of spot holdings
+   */
+  private async handleSpotSellPercentage(ctx: BotContext, symbol: string, percentage: number): Promise<void> {
+    try {
+      if (!ctx.userState?.isLinked) {
+        await ctx.reply('❌ Please link your API credentials first using /link');
+        return;
+      }
+
+      const apiClient = await this.apiClientService.getOrCreateClient(ctx.userState.userId);
+      
+      // Get current balance (simplified for now until spot API is fully implemented)
+      // const account = await apiClient.getAccount();
+      // const asset = symbol.replace('USDT', '');
+      // const balance = account.balances.find((b: any) => b.asset === asset);
+      
+      // For now, show that this feature needs full spot API integration
+      await ctx.editMessageText(
+        `⚠️ **Spot Sell Feature**\n\nThis feature requires full spot API integration.\nPlease use the main trading interface for spot sales.`,
+        { parse_mode: 'Markdown' }
+      );
+      return;
+
+      // This will be enabled once spot API is fully integrated
+      /*
+      if (!balance || parseFloat(balance.free) <= 0) {
+        await ctx.editMessageText(`❌ No ${asset} balance available to sell`, { parse_mode: 'Markdown' });
+        return;
+      }
+
+      const availableAmount = parseFloat(balance.free);
+      const sellAmount = (availableAmount * percentage) / 100;
+      
+      if (sellAmount < 0.000001) {
+        await ctx.editMessageText(`❌ Sell amount too small: ${sellAmount.toFixed(8)} ${asset}`, { parse_mode: 'Markdown' });
+        return;
+      }
+
+      // Get exchange info for precision
+      const exchangeInfo = await apiClient.getExchangeInfo();
+      const symbolInfo = exchangeInfo.symbols.find((s: any) => s.symbol === symbol);
+      const lotSizeFilter = symbolInfo?.filters?.find((f: any) => f.filterType === 'LOT_SIZE');
+      const stepSize = lotSizeFilter ? parseFloat(lotSizeFilter.stepSize) : 0.000001;
+      
+      // Format quantity with proper precision
+      const formattedQuantity = this.formatQuantityWithPrecision(sellAmount, stepSize);
+
+      // Show confirmation
+      const confirmText = [
+        `🔴 **Confirm Spot Sell Order**`,
+        '',
+        `💰 **Sell ${percentage}% of ${asset} Holdings**`,
+        `🪙 **Amount:** ${formattedQuantity} ${asset}`,
+        `📊 **Available:** ${availableAmount.toFixed(6)} ${asset}`,
+        `💱 **Market:** ${symbol}`,
+        '',
+        '⚠️ This will execute a market sell order immediately'
+      ].join('\n');
+
+      const keyboard = Markup.inlineKeyboard([
+        [
+          Markup.button.callback('✅ Confirm Sell', `spot_confirm_sell_${formattedQuantity}_${symbol}`),
+          Markup.button.callback('❌ Cancel', 'main_menu')
+        ]
+      ]);
+
+      await ctx.editMessageText(confirmText, { parse_mode: 'Markdown', ...keyboard });
+      */
+    } catch (error) {
+      console.error('Spot sell percentage error:', error);
+      await ctx.reply(`❌ Failed to prepare sell order: ${error instanceof Error ? error.message : 'Unknown error'}`);
+    }
+  }
+
+  /**
+   * Handle spot confirm sell - executes the confirmed sell order
+   */
+  private async handleSpotConfirmSell(ctx: BotContext, symbol: string, quantity: number): Promise<void> {
+    try {
+      if (!ctx.userState?.isLinked) {
+        await ctx.reply('❌ Please link your API credentials first using /link');
+        return;
+      }
+
+      const apiClient = await this.apiClientService.getOrCreateClient(ctx.userState.userId);
+      
+      // For now, show that this feature needs full spot API integration
+      await ctx.editMessageText(
+        `⚠️ **Spot Sell Confirmation**\n\nThis feature requires full spot API integration.\nPlease use the main trading interface for spot sales.`,
+        { parse_mode: 'Markdown' }
+      );
+
+    } catch (error) {
+      console.error('Spot confirm sell error:', error);
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error occurred';
+      
+      const errorText = [
+        '❌ **Spot Sell Order Failed**',
+        '',
+        `**Symbol:** ${symbol}`,
+        `**Error:** ${errorMessage}`,
+        '',
+        'Please try again or contact support if the issue persists.'
+      ].join('\n');
+
+      await ctx.editMessageText(errorText, { parse_mode: 'Markdown' });
+    }
   }
 
   /**

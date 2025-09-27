@@ -28,11 +28,6 @@ export interface UserSettings {
   pin_hash: string | null;
 }
 
-export interface UserSession {
-  user_id: number;
-  listen_key: string;
-  listen_key_expires_at: Date;
-}
 
 export interface Order {
   id?: number;
@@ -407,6 +402,13 @@ export interface UserState {
     type?: 'expecting_stop_loss' | 'expecting_take_profit' | 'expecting_margin';
     symbol?: string;
     marginType?: 'add' | 'reduce';
+  };
+  // Legacy input handling properties (for backward compatibility)
+  awaitingInput?: string | boolean;
+  inputContext?: {
+    type: string;
+    direction?: string;
+    data?: any;
   };
 }
 

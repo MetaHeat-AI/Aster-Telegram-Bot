@@ -9,7 +9,6 @@ export interface ApiClientServiceConfig {
 }
 
 export class ApiClientService {
-  private userSessions = new Map<number, AsterApiClient>();
   private db: DatabaseManager;
   private encryption: EncryptionManager;
   private config: ApiClientServiceConfig;
@@ -25,9 +24,6 @@ export class ApiClientService {
     this.encryption = encryption;
     this.config = config;
     this.eventEmitter = eventEmitter;
-    
-    // Clean up expired sessions periodically
-    setInterval(() => this.cleanupExpiredSessions(), 30 * 60 * 1000); // 30 minutes
   }
 
   /**
@@ -38,32 +34,19 @@ export class ApiClientService {
     const startTime = Date.now();
     
     try {
-      // Check if we have a cached client
-      let client = this.userSessions.get(userId);
+      // Create fresh client from database credentials
+      const client = await this.createClientFromDatabase(userId);
       
-      if (!client) {
-        // Create new client from database credentials
-        client = await this.createClientFromDatabase(userId);
-        this.userSessions.set(userId, client);
-        
-        this.eventEmitter.emitEvent({
-          type: EventTypes.API_CLIENT_CREATED,
-          timestamp: new Date(),
-          userId,
-          telegramId: 0, // Will be updated by caller if available
-          endpoint: 'client_creation',
-          method: 'CREATE',
-          success: true,
-          duration: Date.now() - startTime
-        });
-      }
-      
-      // Validate client is still working
-      if (!(await this.validateClient(client))) {
-        // Recreate client if validation fails
-        client = await this.createClientFromDatabase(userId);
-        this.userSessions.set(userId, client);
-      }
+      this.eventEmitter.emitEvent({
+        type: EventTypes.API_CLIENT_CREATED,
+        timestamp: new Date(),
+        userId,
+        telegramId: 0, // Will be updated by caller if available
+        endpoint: 'client_creation',
+        method: 'CREATE',
+        success: true,
+        duration: Date.now() - startTime
+      });
       
       return client;
     } catch (error) {
@@ -95,19 +78,6 @@ export class ApiClientService {
     }
   }
 
-  /**
-   * Remove a client from the cache (e.g., when credentials are revoked)
-   */
-  removeClient(userId: number): void {
-    this.userSessions.delete(userId);
-  }
-
-  /**
-   * Get client count for monitoring
-   */
-  getClientCount(): number {
-    return this.userSessions.size;
-  }
 
   /**
    * Create a new client from database credentials
@@ -135,24 +105,4 @@ export class ApiClientService {
     return client;
   }
 
-  /**
-   * Clean up clients that haven't been used recently
-   */
-  private async cleanupExpiredSessions(): Promise<void> {
-    const maxAge = 2 * 60 * 60 * 1000; // 2 hours
-    const now = Date.now();
-    
-    // Simple cleanup - in production you'd track last access time
-    if (this.userSessions.size > 100) {
-      console.log('[ApiClientService] Performing session cleanup');
-      // Keep only the most recent sessions
-      const entries = Array.from(this.userSessions.entries());
-      this.userSessions.clear();
-      
-      // Keep the last 50 sessions
-      entries.slice(-50).forEach(([userId, client]) => {
-        this.userSessions.set(userId, client);
-      });
-    }
-  }
 }

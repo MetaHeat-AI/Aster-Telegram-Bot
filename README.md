@@ -1,6 +1,6 @@
 # 🤖 Aster DEX Telegram Trading Bot
 
-A production-grade Telegram bot for trading Aster DEX Perpetual futures with BONK-style UX. Features natural language trade parsing, advanced price protection, real-time notifications, and secure credential management.
+A production-grade Telegram bot for trading Aster DEX Perpetual futures with BONK-style UX. Features natural language trade parsing, advanced price protection, and secure credential management.
 
 ![License](https://img.shields.io/badge/license-MIT-blue.svg)
 ![Node](https://img.shields.io/badge/node-%3E%3D18.0.0-green.svg)
@@ -22,13 +22,12 @@ A production-grade Telegram bot for trading Aster DEX Perpetual futures with BON
 
 ### 🔐 Security & Privacy
 - **Encrypted Credentials**: AES-256-GCM encryption for API keys
-- **Secure Sessions**: JWT-based authentication with Redis
+- **Secure Sessions**: JWT-based authentication
 - **Rate Limiting**: Built-in protection against API abuse
 - **Audit Logging**: Complete transaction and action logging
 
 ### 📱 User Experience
 - **Intuitive Commands**: Simple slash commands for all functions
-- **Real-time Notifications**: WebSocket-powered trade alerts
 - **Customizable Settings**: Personalized trading preferences
 - **Multi-language Support**: Extensible localization system
 
@@ -79,9 +78,7 @@ A production-grade Telegram bot for trading Aster DEX Perpetual futures with BON
 - **Runtime**: Node.js 18+ with TypeScript
 - **Bot Framework**: Telegraf.js for Telegram integration  
 - **Database**: PostgreSQL with connection pooling
-- **Caching**: Redis for sessions and rate limiting
 - **HTTP**: Express.js server with health checks
-- **WebSocket**: Native ws library for real-time data
 
 ## 🔧 Local Development
 
@@ -109,7 +106,7 @@ npm run conform
 ### Aster DEX Compatibility
 This bot implements full Binance Futures API compatibility:
 - REST endpoints: `https://fapi.asterdex.com/fapi/v1/*`
-- WebSocket streams: `wss://fstream.asterdex.com/ws/*`  
+  
 - HMAC-SHA256 authentication
 - Standard order types and time-in-force options
 
@@ -123,7 +120,7 @@ This bot implements full Binance Futures API compatibility:
 
 ### Session Security  
 - JWT-based session management
-- Redis session storage with TTL
+- Database session storage with TTL
 - Rate limiting per user and globally
 - Input sanitization and validation
 

@@ -1,7 +1,6 @@
 #!/usr/bin/env ts-node
 
 import axios, { AxiosInstance } from 'axios';
-import WebSocket from 'ws';
 import { AsterSigner } from '../src/signing';
 import crypto from 'crypto';
 import fs from 'fs';
@@ -212,83 +211,6 @@ class AsterConformanceTest {
     }
   }
 
-  async test6_UserStream(): Promise<void> {
-    const start = Date.now();
-    try {
-      if (this.config.mockMode) {
-        this.log('User Stream Test', 'PASS', 'Mock user stream simulation', 0);
-        return;
-      }
-
-      if (!this.config.apiKey || !this.config.apiSecret) {
-        this.log('User Stream Test', 'FAIL', 'Missing API credentials', 0);
-        return;
-      }
-
-      // Create listen key
-      const response = await this.axios.post('/fapi/v1/listenKey');
-      const listenKey = response.data.listenKey;
-      
-      if (!listenKey) {
-        this.log('User Stream Test', 'FAIL', 'Failed to create listen key', Date.now() - start);
-        return;
-      }
-
-      // Test WebSocket connection - Aster uses different subdomain for WebSocket
-      let wsBaseUrl;
-      if (this.config.baseUrl.includes('fapi.asterdex.com')) {
-        wsBaseUrl = 'wss://fstream.asterdex.com';
-      } else {
-        wsBaseUrl = this.config.baseUrl.replace('https://', 'wss://').replace('http://', 'ws://');
-      }
-      const wsUrl = `${wsBaseUrl}/ws/${listenKey}`;
-      const ws = new WebSocket(wsUrl);
-      
-      let connected = false;
-      let receivedData = false;
-
-      const timeout = setTimeout(() => {
-        if (!connected) {
-          ws.close();
-          this.log('User Stream Test', 'FAIL', 'WebSocket connection timeout', Date.now() - start);
-        }
-      }, 10000);
-
-      ws.on('open', () => {
-        connected = true;
-        console.log('🔌 WebSocket connected');
-      });
-
-      ws.on('message', (data: any) => {
-        receivedData = true;
-        try {
-          const event = JSON.parse(data.toString());
-          console.log(`📨 Received event: ${event.e || 'unknown'}`);
-        } catch (e) {
-          console.log('📨 Received data (non-JSON)');
-        }
-      });
-
-      ws.on('close', () => {
-        clearTimeout(timeout);
-        const timing = Date.now() - start;
-        if (connected) {
-          this.log('User Stream Test', 'PASS', `WebSocket lifecycle completed`, timing);
-        } else {
-          this.log('User Stream Test', 'FAIL', 'WebSocket failed to connect', timing);
-        }
-      });
-
-      // Close after 5 seconds
-      setTimeout(() => {
-        ws.close();
-      }, 5000);
-
-    } catch (error: any) {
-      const timing = Date.now() - start;
-      this.log('User Stream Test', 'FAIL', `Error: ${error.message}`, timing);
-    }
-  }
 
   async test7_OrderLifecycle(): Promise<void> {
     const start = Date.now();
@@ -376,7 +298,6 @@ class AsterConformanceTest {
     console.log('\n⏳ Waiting 2 seconds before user stream test...\n');
     await new Promise(resolve => setTimeout(resolve, 2000));
     
-    await this.test6_UserStream();
     
     // Add delay before order lifecycle test
     console.log('\n⏳ Waiting 3 seconds before order lifecycle test...\n');

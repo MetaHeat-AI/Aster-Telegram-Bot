@@ -82,13 +82,23 @@ export class TradingHandler extends BaseHandler {
           action: 'BUY' // Default for spot interface
         });
 
-        const spotAccountService = await this.getSpotAccountService(ctx.userState.userId);
-        const availableUsdt = await spotAccountService.getUsdtBalance();
+        // Get services first (fast, mostly cached)
+        const [spotAccountService, symbolService] = await Promise.all([
+          this.getSpotAccountService(ctx.userState.userId),
+          this.getSymbolService(ctx.userState.userId)
+        ]);
 
         if (customSymbol) {
+          // For custom symbol, only need balance
+          const availableUsdt = await spotAccountService.getUsdtBalance();
           await this.showCustomSpotInterface(ctx, customSymbol, availableUsdt);
         } else {
-          await this.showSpotTradingInterface(ctx, availableUsdt);
+          // Run account and symbol data in parallel - PERFORMANCE BOOST
+          const [availableUsdt, topSpotSymbols] = await Promise.all([
+            spotAccountService.getUsdtBalance(),
+            symbolService.getTopSymbolsByVolume(4, 'spot')
+          ]);
+          await this.showSpotTradingInterface(ctx, availableUsdt, topSpotSymbols);
         }
 
         await this.emitNavigation(ctx, 'trading_menu', 'spot_trading', { customSymbol });
@@ -119,17 +129,23 @@ export class TradingHandler extends BaseHandler {
           action: 'BUY' // Default for perps interface
         });
 
-        const futuresAccountService = await this.getFuturesAccountService(ctx.userState.userId);
+        // Get services first (fast, mostly cached)
+        const [futuresAccountService, symbolService] = await Promise.all([
+          this.getFuturesAccountService(ctx.userState.userId),
+          this.getSymbolService(ctx.userState.userId)
+        ]);
 
         if (customSymbol) {
           const availableBalance = await futuresAccountService.getAvailableBalance();
           await this.showCustomPerpsInterface(ctx, customSymbol, availableBalance);
         } else {
-          const [availableBalance, portfolioSummary] = await Promise.all([
+          // Run all futures data in parallel - PERFORMANCE BOOST
+          const [availableBalance, portfolioSummary, topPerpsSymbols] = await Promise.all([
             futuresAccountService.getAvailableBalance(),
-            futuresAccountService.getPortfolioSummary()
+            futuresAccountService.getPortfolioSummary(),
+            symbolService.getTopSymbolsByVolume(4, 'futures')
           ]);
-          await this.showPerpsTradingInterface(ctx, availableBalance, portfolioSummary);
+          await this.showPerpsTradingInterface(ctx, availableBalance, portfolioSummary, topPerpsSymbols);
         }
 
         await this.emitNavigation(ctx, 'trading_menu', 'perps_trading', { customSymbol });
@@ -140,9 +156,15 @@ export class TradingHandler extends BaseHandler {
   }
 
 
-  private async showSpotTradingInterface(ctx: BotContext, availableUsdt: number): Promise<void> {
+  private async showSpotTradingInterface(ctx: BotContext, availableUsdt: number, topSpotSymbols?: any[]): Promise<void> {
+    // Get symbol service for emoji/name formatting
     const symbolService = await this.getSymbolService(ctx.userState?.userId || 0);
-    const topSpotSymbols = await symbolService.getTopSymbolsByVolume(4, 'spot');
+    
+    // Use pre-fetched symbols if provided, otherwise fetch them (fallback for backward compatibility)
+    let symbols = topSpotSymbols;
+    if (!symbols) {
+      symbols = await symbolService.getTopSymbolsByVolume(4, 'spot');
+    }
 
     let spotText = `
 🏪 **Spot Trading Interface**
@@ -152,7 +174,7 @@ export class TradingHandler extends BaseHandler {
 **Top Spot Pairs:**`;
 
     // Add top symbols to text
-    topSpotSymbols.slice(0, 3).forEach(symbol => {
+    symbols.slice(0, 3).forEach(symbol => {
       const emoji = symbolService.getSymbolEmoji(symbol.symbol);
       const name = symbolService.getCleanSymbolName(symbol.symbol);
       const price = parseFloat(symbol.lastPrice).toFixed(4);
@@ -166,7 +188,7 @@ export class TradingHandler extends BaseHandler {
     const keyboardRows = [];
 
     // Create buttons from top symbols (2x2 grid)
-    const buttonSymbols = topSpotSymbols.slice(0, 4);
+    const buttonSymbols = symbols.slice(0, 4);
     for (let i = 0; i < buttonSymbols.length; i += 2) {
       const row = [];
       
@@ -217,11 +239,19 @@ export class TradingHandler extends BaseHandler {
   private async showPerpsTradingInterface(
     ctx: BotContext, 
     availableBalance: number, 
-    portfolioSummary: any
+    portfolioSummary: any,
+    topPerpsSymbols?: any[]
   ): Promise<void> {
     const totalWallet = portfolioSummary.totalWalletBalance;
+    
+    // Get symbol service for emoji/name formatting
     const symbolService = await this.getSymbolService(ctx.userState?.userId || 0);
-    const topFuturesSymbols = await symbolService.getTopSymbolsByVolume(3, 'futures');
+    
+    // Use pre-fetched symbols if provided, otherwise fetch them (fallback for backward compatibility)
+    let topFuturesSymbols = topPerpsSymbols;
+    if (!topFuturesSymbols) {
+      topFuturesSymbols = await symbolService.getTopSymbolsByVolume(3, 'futures');
+    }
 
     let perpsText = `
 ⚡ **Perps Trading Interface**
