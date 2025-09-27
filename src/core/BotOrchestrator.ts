@@ -689,6 +689,7 @@ export class BotOrchestrator {
     this.bot.on('text', (ctx) => {
       // Handle conversation states and natural language commands
       console.log(`[Text] Received: ${ctx.message.text} from user ${ctx.userState?.userId}`);
+      console.log(`[Text] Conversation state: ${ctx.userState?.conversationState?.step || 'none'}`);
       
       // Check if expecting custom pair input
       if ((ctx.userState as any)?.expectingCustomPair) {
@@ -733,6 +734,21 @@ export class BotOrchestrator {
         return;
       }
 
+      // Fallback: Check if text looks like API key/secret and user is not linked
+      if (!ctx.userState?.isLinked && ctx.message.text.length > 30) {
+        const text = ctx.message.text.trim();
+        // Basic heuristic: if it looks like a long alphanumeric string, might be API key/secret
+        if (/^[a-zA-Z0-9]{30,}$/.test(text)) {
+          console.log(`[Text] Detected potential API key/secret from unlinked user`);
+          await ctx.reply(
+            '🔗 **API Key Detected**\n\n' +
+            'It looks like you sent an API key, but I need to start the linking process first.\n\n' +
+            'Please click the "🔗 Link API" button to begin the secure linking process.',
+            { parse_mode: 'Markdown' }
+          );
+          return;
+        }
+      }
       
       // Add other text processing logic here if needed
     });
@@ -1187,6 +1203,8 @@ Contact @AsterDEX\\_Support or visit docs.aster.exchange for detailed guides.
       step: 'waiting_api_key',
       data: { pendingAction: 'link' }
     };
+
+    console.log(`[Link] Set conversation state for user ${ctx.userState.telegramId}: waiting_api_key`);
 
     const linkingText = [
       '🔗 **API Linking Process**',
