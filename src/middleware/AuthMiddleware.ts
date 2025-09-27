@@ -40,7 +40,14 @@ export class AuthMiddleware {
         }
 
         // Load or create user state
+        const existingConversationState = ctx.userState?.conversationState;
         ctx.userState = await this.loadUserState(telegramId);
+        
+        // Preserve conversation state if it exists
+        if (existingConversationState && ctx.userState) {
+          ctx.userState.conversationState = existingConversationState;
+          console.log(`[Auth] Preserved conversation state: ${existingConversationState.step}`);
+        }
         
         if (ctx.userState) {
           this.eventEmitter.emitEvent({
