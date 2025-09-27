@@ -143,6 +143,11 @@ export class BotOrchestrator {
     this.server = express();
     this.server.use(express.json());
     
+    // Root endpoint for basic connectivity test
+    this.server.get('/', (req, res) => {
+      res.json({ status: 'AsterBot is running', timestamp: new Date().toISOString() });
+    });
+    
     // Health check endpoint
     this.server.get('/health', (req, res) => {
       res.json({
@@ -283,8 +288,12 @@ export class BotOrchestrator {
 
       // Start server
       const port = this.config.server.port;
-      this.server.listen(port, () => {
-        console.log(`[Server] Listening on port ${port}`);
+      this.server.listen(port, '0.0.0.0', () => {
+        console.log(`[Server] ✅ Express server listening on port ${port}`);
+        console.log(`[Server] ✅ Webhook endpoint: ${this.config.webhook.path}`);
+      }).on('error', (error) => {
+        console.error(`[Server] ❌ Failed to start server:`, error);
+        throw error;
       });
 
       // Start bot (webhook only)

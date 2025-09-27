@@ -70,13 +70,25 @@ async function main(): Promise<void> {
 
 // Handle uncaught exceptions
 process.on('uncaughtException', (error) => {
-  console.error('Uncaught Exception:', error);
+  console.error('❌ Uncaught Exception:', error);
+  console.error('Stack:', error.stack);
   process.exit(1);
 });
 
 process.on('unhandledRejection', (reason, promise) => {
-  console.error('Unhandled Rejection at:', promise, 'reason:', reason);
+  console.error('❌ Unhandled Rejection at:', promise);
+  console.error('❌ Reason:', reason);
   process.exit(1);
+});
+
+process.on('SIGTERM', () => {
+  console.log('📡 Received SIGTERM, shutting down gracefully');
+  process.exit(0);
+});
+
+process.on('SIGINT', () => {
+  console.log('📡 Received SIGINT, shutting down gracefully');
+  process.exit(0);
 });
 
 // Start the application
