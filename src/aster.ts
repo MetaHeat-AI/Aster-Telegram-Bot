@@ -365,13 +365,13 @@ export class AsterApiClient {
       amount: params.amount,
     };
 
-    const signedRequest = AsterSigner.signPostRequest('/sapi/v1/asset/transfer', requestParams, this.apiSecret);
+    const signedRequest = AsterSigner.signPostRequest('/fapi/v1/transfer', requestParams, this.apiSecret);
     
     // Use the same query string that was signed to ensure consistency
     const formData = new URLSearchParams(signedRequest.queryString);
 
-    console.log(`[API] POST /sapi/v1/asset/transfer - ${params.type}: ${params.amount} ${params.asset}`);
-    const response = await this.axios.post('/sapi/v1/asset/transfer', formData, {
+    console.log(`[API] POST /fapi/v1/transfer - ${params.type}: ${params.amount} ${params.asset}`);
+    const response = await this.axios.post('/fapi/v1/transfer', formData, {
       headers: {
         'Content-Type': 'application/x-www-form-urlencoded',
       },
