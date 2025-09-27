@@ -62,12 +62,17 @@ export class SymbolService {
         this.safeGetSpotExchangeInfo()
       ]);
 
+      console.log(`[SymbolService] Got ${spotTickers.length} spot tickers and ${spotExchangeInfo?.symbols?.length || 0} exchange symbols`);
+
       // Get available spot symbols
       const spotSymbols = new Set(
         (spotExchangeInfo?.symbols || [])
           .filter((s: any) => s.status === 'TRADING')
           .map((s: any) => s.symbol)
       );
+
+      console.log(`[SymbolService] Found ${spotSymbols.size} available spot symbols`);
+      console.log(`[SymbolService] Sample spot symbols:`, Array.from(spotSymbols).slice(0, 5));
 
       // Filter to only USDT pairs that are available on spot
       const spotUsdtTickers = spotTickers
@@ -81,6 +86,13 @@ export class SymbolService {
           return volumeB - volumeA;
         })
         .slice(0, count);
+
+      console.log(`[SymbolService] Top ${count} spot symbols:`, spotUsdtTickers.map(t => t.symbol));
+      
+      // Check specifically for SOLUSDT
+      const solInSpot = spotSymbols.has('SOLUSDT');
+      const solTicker = spotTickers.find(t => t.symbol === 'SOLUSDT');
+      console.log(`[SymbolService] SOLUSDT availability - In spot exchange: ${solInSpot}, Has ticker: ${!!solTicker}`);
 
       // Convert to SymbolData format
       return spotUsdtTickers.map(ticker => ({

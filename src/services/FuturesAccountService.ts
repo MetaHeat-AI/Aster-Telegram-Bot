@@ -6,9 +6,12 @@ export interface FuturesPosition {
   side: 'LONG' | 'SHORT' | 'NONE';
   size: number;
   entryPrice: number;
+  currentPrice?: number;
   leverage: number;
   unrealizedPnl: number;
+  realTimeUnrealizedPnl?: number;
   pnlPercent: number;
+  realTimePnlPercent?: number;
   notional: number;
   marginType: 'isolated' | 'cross';
   isolatedWallet?: number;
@@ -32,9 +35,28 @@ export interface FuturesPortfolioSummary {
 
 export class FuturesAccountService {
   private apiClient: AsterApiClient;
+  private lastTradeTime: number = 0;
 
   constructor(apiClient: AsterApiClient) {
     this.apiClient = apiClient;
+  }
+
+  // Call this method after executing a trade to record the time
+  markTradeExecuted(): void {
+    this.lastTradeTime = Date.now();
+    console.log('[FuturesAccountService] Trade execution recorded');
+  }
+
+  // Add delay if a trade was recently executed
+  private async addDelayIfNeeded(): Promise<void> {
+    const timeSinceLastTrade = Date.now() - this.lastTradeTime;
+    const POSITION_UPDATE_DELAY = 1500; // 1.5 seconds
+    
+    if (timeSinceLastTrade < POSITION_UPDATE_DELAY) {
+      const delayNeeded = POSITION_UPDATE_DELAY - timeSinceLastTrade;
+      console.log(`[FuturesAccountService] Adding ${delayNeeded}ms delay for position update after recent trade`);
+      await new Promise(resolve => setTimeout(resolve, delayNeeded));
+    }
   }
 
   async getFuturesAccount(): Promise<AccountInfo> {
@@ -43,8 +65,31 @@ export class FuturesAccountService {
 
   async getOpenPositions(): Promise<FuturesPosition[]> {
     try {
+      // Add delay if a trade was recently executed
+      await this.addDelayIfNeeded();
+      
       const positions = await this.apiClient.getPositionRisk();
       const openPositions: FuturesPosition[] = [];
+
+      // Get all symbols with open positions
+      const openSymbols = positions
+        .filter(p => Math.abs(parseFloat(p.positionAmt)) > 0)
+        .map(p => p.symbol);
+
+      // Fetch current mark prices for all open positions
+      let markPrices: { [symbol: string]: number } = {};
+      if (openSymbols.length > 0) {
+        try {
+          const markPriceData = await this.apiClient.getMarkPrice();
+          markPrices = markPriceData.reduce((acc, item) => {
+            acc[item.symbol] = parseFloat(item.markPrice);
+            return acc;
+          }, {} as { [symbol: string]: number });
+          console.log(`[FuturesAccountService] Fetched mark prices for ${Object.keys(markPrices).length} symbols`);
+        } catch (error) {
+          console.warn('[FuturesAccountService] Failed to fetch mark prices:', error);
+        }
+      }
 
       for (const position of positions) {
         const positionAmt = parseFloat(position.positionAmt);
@@ -52,7 +97,17 @@ export class FuturesAccountService {
         if (Math.abs(positionAmt) > 0) {
           const entryPrice = parseFloat(position.entryPrice);
           const leverage = parseFloat(position.leverage);
-          const unrealizedPnl = parseFloat(position.unrealizedPnl);
+          const currentPrice = markPrices[position.symbol];
+          
+          // Parse unrealized PnL - handle potential undefined/empty values
+          let unrealizedPnl = 0;
+          if (position.unrealizedPnl && position.unrealizedPnl !== '' && position.unrealizedPnl !== '0') {
+            unrealizedPnl = parseFloat(position.unrealizedPnl);
+          }
+          
+          // Log raw PnL data for debugging
+          console.log(`[FuturesAccountService] ${position.symbol} - Raw PnL: "${position.unrealizedPnl}", Parsed: ${unrealizedPnl}`);
+          
           const notional = Math.abs(positionAmt * entryPrice);
           
           let side: 'LONG' | 'SHORT' | 'NONE' = 'NONE';
@@ -61,14 +116,30 @@ export class FuturesAccountService {
 
           const pnlPercent = notional > 0 ? (unrealizedPnl / notional * 100) : 0;
 
+          // Calculate real-time PnL if we have current price
+          let realTimeUnrealizedPnl = unrealizedPnl;
+          let realTimePnlPercent = pnlPercent;
+          
+          if (currentPrice && currentPrice > 0) {
+            const direction = side === 'LONG' ? 1 : -1;
+            const priceDiff = currentPrice - entryPrice;
+            realTimeUnrealizedPnl = priceDiff * Math.abs(positionAmt) * direction;
+            realTimePnlPercent = notional > 0 ? (realTimeUnrealizedPnl / notional * 100) : 0;
+            
+            console.log(`[FuturesAccountService] ${position.symbol} - Real-time PnL calculation: entry=${entryPrice}, current=${currentPrice}, diff=${priceDiff}, realTimePnL=${realTimeUnrealizedPnl}`);
+          }
+
           openPositions.push({
             symbol: position.symbol,
             side,
             size: Math.abs(positionAmt),
             entryPrice,
+            currentPrice,
             leverage,
             unrealizedPnl,
+            realTimeUnrealizedPnl,
             pnlPercent,
+            realTimePnlPercent,
             notional,
             marginType: position.isolated ? 'isolated' : 'cross',
             isolatedWallet: position.isolated ? parseFloat(position.isolatedWallet) : undefined

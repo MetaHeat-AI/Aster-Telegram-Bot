@@ -1786,45 +1786,54 @@ ${trade.maxSlippageExceeded ? '\n❌ **Max slippage exceeded**' : ''}
     }
 
     try {
-      const apiClient = await this.getOrCreateApiClient(ctx.userState.userId);
-      const positions = await apiClient.getPositionRisk();
-      
-      const openPositions = positions.filter(pos => parseFloat(pos.positionAmt) !== 0);
+      console.log('[POSITIONS] Fetching positions with enhanced data...');
+      const futuresService = await this.getFuturesAccountService(ctx.userState.userId);
+      const openPositions = await futuresService.getOpenPositions();
       
       if (openPositions.length === 0) {
-        await ctx.reply('📊 No open positions found.');
+        const keyboard = Markup.inlineKeyboard([
+          [
+            Markup.button.callback('📈 Start Trading', 'unified_trade'),
+            Markup.button.callback('💰 Balance', 'balance')
+          ],
+          [
+            Markup.button.callback('🔙 Back', 'main_menu')
+          ]
+        ]);
+        
+        await ctx.reply('📊 **No Open Positions**\n\nYou don\'t have any open futures positions.\n\nUse the trading interface to open positions!', { parse_mode: 'Markdown', ...keyboard });
         return;
       }
 
       let positionsText = '📊 **Open Positions**\n\n';
       
-      openPositions.forEach(pos => {
-        const side = parseFloat(pos.positionAmt) > 0 ? '🟢 LONG' : '🔴 SHORT';
+      openPositions.forEach(position => {
+        const sideEmoji = position.side === 'LONG' ? '🟢' : '🔴';
+        const sideText = `${sideEmoji} ${position.side}`;
         
-        // More robust PnL parsing
-        let pnl = 0;
-        if (pos.unrealizedPnl && pos.unrealizedPnl !== '' && pos.unrealizedPnl !== '0' && !isNaN(parseFloat(pos.unrealizedPnl))) {
-          pnl = parseFloat(pos.unrealizedPnl);
-        }
+        // Use real-time PnL if available, fallback to API PnL
+        const displayPnl = position.realTimeUnrealizedPnl ?? position.unrealizedPnl;
+        const displayPnlPercent = position.realTimePnlPercent ?? position.pnlPercent;
         
-        const pnlEmoji = pnl >= 0 ? '📈' : '📉';
-        const pnlColor = pnl >= 0 ? '🟢' : '🔴';
+        const pnlEmoji = displayPnl >= 0 ? '📈' : '📉';
+        const pnlColor = displayPnl >= 0 ? '🟢' : '🔴';
         
-        // Debug logging for PnL issues
-        console.log(`[DEBUG] Position PnL for ${pos.symbol}: raw="${pos.unrealizedPnl}", parsed=${pnl}`);
+        // Debug logging
+        console.log(`[POSITIONS] ${position.symbol}: API PnL=${position.unrealizedPnl}, Real-time PnL=${position.realTimeUnrealizedPnl}, Current Price=${position.currentPrice}`);
         
         positionsText += [
-          `**${pos.symbol}** ${side}`,
-          `• Size: ${Math.abs(parseFloat(pos.positionAmt))}`,
-          `• Entry: $${parseFloat(pos.entryPrice).toFixed(4)}`,
-          `• Leverage: ${pos.leverage}x`,
-          `• ${pnlColor} ${pnlEmoji} PnL: ${pnl >= 0 ? '+' : ''}$${pnl.toFixed(2)}`,
-          pos.unrealizedPnl === '' || pos.unrealizedPnl === '0' ? `⚠️ (PnL not available)` : '',
+          `**${position.symbol}** ${sideText}`,
+          `• Size: ${position.size.toFixed(4)}`,
+          `• Entry: $${position.entryPrice.toFixed(4)}`,
+          position.currentPrice ? `• Current: $${position.currentPrice.toFixed(4)}` : '',
+          `• Leverage: ${position.leverage}x`,
+          `• ${pnlColor} ${pnlEmoji} PnL: ${displayPnl >= 0 ? '+' : ''}$${displayPnl.toFixed(2)} (${displayPnlPercent >= 0 ? '+' : ''}${displayPnlPercent.toFixed(1)}%)`,
+          position.currentPrice ? '' : '⚠️ (Real-time price unavailable)',
           '',
         ].filter(Boolean).join('\n');
       });
 
-      // Enhanced positions with quick trading buttons
+      // Enhanced positions with quick trading buttons and refresh functionality
       const keyboard = Markup.inlineKeyboard([
         ...openPositions.map(pos => [
           Markup.button.callback(`📊 ${pos.symbol}`, `position_manage_${pos.symbol}`),
@@ -1836,7 +1845,13 @@ ${trade.maxSlippageExceeded ? '\n❌ **Max slippage exceeded**' : ''}
         ]
       ]);
 
-      await ctx.reply(positionsText, { parse_mode: 'Markdown', ...keyboard });
+      try {
+        await ctx.editMessageText(positionsText, { parse_mode: 'Markdown', ...keyboard });
+        console.log('[POSITIONS] Successfully displayed enhanced position data via edit');
+      } catch (error) {
+        await ctx.reply(positionsText, { parse_mode: 'Markdown', ...keyboard });
+        console.log('[POSITIONS] Successfully displayed enhanced position data via reply');
+      }
 
     } catch (error) {
       console.error('Positions command error:', error);
@@ -3211,6 +3226,10 @@ ${preview.maxSlippageExceeded ? '\n❌ **Max slippage exceeded**' : ''}
         type: 'MARKET',
         quantity
       });
+
+      // Mark trade executed for position update timing
+      const futuresService = await this.getFuturesAccountService(ctx.userState.userId);
+      futuresService.markTradeExecuted();
 
       await ctx.answerCbQuery('✅ Futures order executed!');
       await ctx.editMessageText(
