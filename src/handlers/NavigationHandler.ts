@@ -180,11 +180,10 @@ Execute trades instantly with institutional-grade execution, smart slippage prot
         Markup.button.callback('📊 Positions', 'positions')
       ],
       [
-        Markup.button.callback('💸 Transfer', 'transfer_menu'),
-        Markup.button.callback('📊 Prices', 'price_menu')
+        Markup.button.callback('📊 Prices', 'price_menu'),
+        Markup.button.callback('📈 P&L Analysis', 'pnl_analysis')
       ],
       [
-        Markup.button.callback('📈 P&L Analysis', 'pnl_analysis'),
         Markup.button.callback('⚙️ Settings', 'settings')
       ],
       [

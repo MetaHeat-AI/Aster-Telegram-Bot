@@ -352,67 +352,6 @@ export class AsterApiClient {
     return this.createOrder(orderParams);
   }
 
-  async universalTransfer(params: {
-    type: 'MAIN_UMFUTURE' | 'UMFUTURE_MAIN';
-    asset: string;
-    amount: string;
-  }): Promise<{
-    tranId: number;
-  }> {
-    // Try multiple possible endpoint patterns for transfer functionality
-    const endpoints = [
-      '/fapi/v1/transfer',
-      '/sapi/v1/asset/transfer', 
-      '/fapi/v1/asset/transfer',
-      '/api/v1/transfer',
-      '/fapi/v1/universal-transfer'
-    ];
-
-    const requestParams = {
-      type: params.type,
-      asset: params.asset,
-      amount: params.amount,
-    };
-
-    let lastError: any;
-
-    for (const endpoint of endpoints) {
-      try {
-        const signedRequest = AsterSigner.signPostRequest(endpoint, requestParams, this.apiSecret);
-        const formData = new URLSearchParams(signedRequest.queryString);
-
-        console.log(`[API] Trying POST ${endpoint} - ${params.type}: ${params.amount} ${params.asset}`);
-        const response = await this.axios.post(endpoint, formData, {
-          headers: {
-            'Content-Type': 'application/x-www-form-urlencoded',
-          },
-        });
-
-        console.log(`[API] Transfer successful using endpoint: ${endpoint}`);
-        return response.data;
-      } catch (error: any) {
-        lastError = error;
-        console.log(`[API] Endpoint ${endpoint} failed:`, error.response?.status || error.code || error.message);
-        
-        // Check for 404 errors (either raw response or transformed error code)
-        const is404Error = error.response?.status === 404 || error.code === 'NOT_FOUND';
-        
-        // If it's not a 404, throw the error (might be auth, rate limit, etc.)
-        if (!is404Error) {
-          throw error;
-        }
-        
-        // Continue to next endpoint if 404
-        continue;
-      }
-    }
-
-    // If all endpoints failed with 404, throw a custom error
-    const transferError = new Error('Transfer functionality is not yet available on the Aster DEX API. This feature may be under development.') as any;
-    transferError.code = 'TRANSFER_NOT_IMPLEMENTED';
-    transferError.isRetryable = false;
-    throw transferError;
-  }
 
   async get24hrTicker(symbol: string): Promise<{ 
     lastPrice: string; 
