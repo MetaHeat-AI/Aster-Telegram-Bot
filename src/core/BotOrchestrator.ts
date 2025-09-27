@@ -303,11 +303,31 @@ export class BotOrchestrator {
       }));
       console.log(`[Server] ✅ Webhook endpoint created at ${this.config.webhook.path}`);
 
-      await this.bot.telegram.setWebhook(this.config.webhook.url, {
-        secret_token: this.config.webhook.secretToken,
-        drop_pending_updates: true
-      });
-      console.log(`[Bot] ✅ Webhook set to ${this.config.webhook.url}`);
+      // Set webhook with retry logic for rate limiting
+      let retries = 3;
+      while (retries > 0) {
+        try {
+          await this.bot.telegram.setWebhook(this.config.webhook.url, {
+            secret_token: this.config.webhook.secretToken,
+            drop_pending_updates: true
+          });
+          console.log(`[Bot] ✅ Webhook set to ${this.config.webhook.url}`);
+          break;
+        } catch (error: any) {
+          if (error.response?.error_code === 429) {
+            const retryAfter = error.response.parameters?.retry_after || 1;
+            console.log(`[Bot] ⏳ Rate limited, waiting ${retryAfter}s before retry (${retries} attempts left)`);
+            await new Promise(resolve => setTimeout(resolve, retryAfter * 1000));
+            retries--;
+          } else {
+            throw error;
+          }
+        }
+      }
+      
+      if (retries === 0) {
+        console.log(`[Bot] ⚠️ Failed to set webhook after retries, but server is running`);
+      }
       
       this.eventEmitter.emitEvent({
         type: EventTypes.BOT_STARTED,
