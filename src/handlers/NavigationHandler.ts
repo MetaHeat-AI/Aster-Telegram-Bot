@@ -7,6 +7,60 @@ export class NavigationHandler extends BaseHandler {
     super(eventEmitter);
   }
 
+  async showWelcomeMessage(ctx: BotContext): Promise<void> {
+    await this.executeWithErrorHandling(
+      ctx,
+      async () => {
+        const welcomeText = `
+🤖 **Welcome to AsterBot!**
+
+Your gateway to professional DEX trading on Aster Exchange.
+
+**🚀 What can I do for you?**
+
+📈 **Trade** - Spot & Perpetual Futures
+💰 **Portfolio** - Track balances & P&L  
+📊 **Positions** - Manage open trades
+⚙️ **Setup** - Link your API keys
+📖 **Help** - Get support & guides
+
+**Ready to start trading?**
+        `.trim();
+
+        const keyboard = Markup.inlineKeyboard([
+          [
+            Markup.button.callback('🚀 Get Started', 'main_menu')
+          ],
+          [
+            Markup.button.callback('📈 Start Trading', 'unified_trade'),
+            Markup.button.callback('🔗 Link API', 'link_api')
+          ],
+          [
+            Markup.button.callback('📖 Help & Docs', 'help')
+          ]
+        ]);
+        
+        await this.emitNavigation(ctx, 'unknown', 'welcome');
+        
+        await ctx.reply(welcomeText, { 
+          parse_mode: 'Markdown', 
+          ...keyboard 
+        });
+
+        this.eventEmitter.emitEvent({
+          type: EventTypes.INTERFACE_LOADED,
+          timestamp: new Date(),
+          userId: ctx.userState?.userId || 0,
+          telegramId: ctx.userState?.telegramId || ctx.from?.id || 0,
+          correlationId: ctx.correlationId,
+          from: 'unknown',
+          to: 'welcome'
+        });
+      },
+      'Failed to show welcome message'
+    );
+  }
+
   async showMainMenu(ctx: BotContext): Promise<void> {
     await this.executeWithErrorHandling(
       ctx,

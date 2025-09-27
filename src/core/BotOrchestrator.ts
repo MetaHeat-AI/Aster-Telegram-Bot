@@ -213,12 +213,12 @@ export class BotOrchestrator {
    * Setup bot commands
    */
   private setupCommands(): void {
-    // Start command
+    // Start command - shows welcome message
     this.bot.command('start', (ctx) => 
-      this.navigationHandler.showMainMenu(ctx)
+      this.navigationHandler.showWelcomeMessage(ctx)
     );
 
-    // Menu command
+    // Menu command - shows main menu
     this.bot.command('menu', (ctx) => 
       this.navigationHandler.showMainMenu(ctx)
     );
