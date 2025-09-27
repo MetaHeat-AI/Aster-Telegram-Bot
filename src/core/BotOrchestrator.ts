@@ -809,6 +809,27 @@ export class BotOrchestrator {
   }
 
   /**
+   * Safely edit message text with fallback to new message
+   */
+  private async safeEditMessageText(ctx: BotContext, text: string, options: any): Promise<void> {
+    try {
+      await ctx.editMessageText(text, options);
+    } catch (error: any) {
+      if (error.description?.includes("message can't be edited")) {
+        console.log('[Bot] Message too old to edit, sending new message instead');
+        try {
+          await ctx.reply(text, options);
+        } catch (replyError) {
+          console.error('[Bot] Failed to send fallback message:', replyError);
+          await ctx.reply('❌ Unable to load content. Please try again.');
+        }
+      } else {
+        throw error;
+      }
+    }
+  }
+
+  /**
    * Handle placeholder actions with coming soon messages
    */
   private async handlePlaceholderAction(ctx: BotContext, message: string): Promise<void> {
@@ -2125,7 +2146,7 @@ Contact @AsterDEX\\_Support or visit docs.aster.exchange for detailed guides.
         ]
       ]);
 
-      await ctx.editMessageText(priceText, { parse_mode: 'Markdown', ...keyboard });
+      await this.safeEditMessageText(ctx, priceText, { parse_mode: 'Markdown', ...keyboard });
     } catch (error) {
       console.error('Price menu error:', error);
       await ctx.reply('❌ Failed to load price menu. Please try again.');
@@ -2196,7 +2217,7 @@ Contact @AsterDEX\\_Support or visit docs.aster.exchange for detailed guides.
       
       const keyboard = Markup.inlineKeyboard(buttonRows);
 
-      await ctx.editMessageText(priceText, { parse_mode: 'Markdown', ...keyboard });
+      await this.safeEditMessageText(ctx, priceText, { parse_mode: 'Markdown', ...keyboard });
     } catch (error) {
       console.error('Top market cap error:', error);
       await ctx.reply('❌ Failed to load top market cap data. Please try again.');
@@ -2260,7 +2281,7 @@ Contact @AsterDEX\\_Support or visit docs.aster.exchange for detailed guides.
       
       const keyboard = Markup.inlineKeyboard(buttonRows);
 
-      await ctx.editMessageText(volumeText, { parse_mode: 'Markdown', ...keyboard });
+      await this.safeEditMessageText(ctx, volumeText, { parse_mode: 'Markdown', ...keyboard });
     } catch (error) {
       console.error('Top volume error:', error);
       const errorMessage = error instanceof Error ? error.message : 'Unknown error';
@@ -2393,7 +2414,7 @@ Contact @AsterDEX\\_Support or visit docs.aster.exchange for detailed guides.
         ]
       ]);
 
-      await ctx.editMessageText(priceText, { parse_mode: 'Markdown', ...keyboard });
+      await this.safeEditMessageText(ctx, priceText, { parse_mode: 'Markdown', ...keyboard });
     } catch (error) {
       console.error(`Token price error for ${symbol}:`, error);
       await ctx.reply(`❌ Failed to load price data for ${symbol}. Please try again.`);
