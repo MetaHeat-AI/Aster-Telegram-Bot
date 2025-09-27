@@ -359,25 +359,56 @@ export class AsterApiClient {
   }): Promise<{
     tranId: number;
   }> {
+    // Try multiple possible endpoint patterns for transfer functionality
+    const endpoints = [
+      '/fapi/v1/transfer',
+      '/sapi/v1/asset/transfer', 
+      '/fapi/v1/asset/transfer',
+      '/api/v1/transfer',
+      '/fapi/v1/universal-transfer'
+    ];
+
     const requestParams = {
       type: params.type,
       asset: params.asset,
       amount: params.amount,
     };
 
-    const signedRequest = AsterSigner.signPostRequest('/fapi/v1/transfer', requestParams, this.apiSecret);
-    
-    // Use the same query string that was signed to ensure consistency
-    const formData = new URLSearchParams(signedRequest.queryString);
+    let lastError: any;
 
-    console.log(`[API] POST /fapi/v1/transfer - ${params.type}: ${params.amount} ${params.asset}`);
-    const response = await this.axios.post('/fapi/v1/transfer', formData, {
-      headers: {
-        'Content-Type': 'application/x-www-form-urlencoded',
-      },
-    });
+    for (const endpoint of endpoints) {
+      try {
+        const signedRequest = AsterSigner.signPostRequest(endpoint, requestParams, this.apiSecret);
+        const formData = new URLSearchParams(signedRequest.queryString);
 
-    return response.data;
+        console.log(`[API] Trying POST ${endpoint} - ${params.type}: ${params.amount} ${params.asset}`);
+        const response = await this.axios.post(endpoint, formData, {
+          headers: {
+            'Content-Type': 'application/x-www-form-urlencoded',
+          },
+        });
+
+        console.log(`[API] Transfer successful using endpoint: ${endpoint}`);
+        return response.data;
+      } catch (error: any) {
+        lastError = error;
+        console.log(`[API] Endpoint ${endpoint} failed:`, error.response?.status || error.message);
+        
+        // If it's not a 404, throw the error (might be auth, rate limit, etc.)
+        if (error.response?.status !== 404) {
+          throw error;
+        }
+        
+        // Continue to next endpoint if 404
+        continue;
+      }
+    }
+
+    // If all endpoints failed with 404, throw a custom error
+    const transferError = new Error('Transfer functionality is not yet available on the Aster DEX API. This feature may be under development.') as any;
+    transferError.code = 'TRANSFER_NOT_IMPLEMENTED';
+    transferError.isRetryable = false;
+    throw transferError;
   }
 
   async get24hrTicker(symbol: string): Promise<{ 

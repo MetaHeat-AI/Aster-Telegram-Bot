@@ -4784,10 +4784,38 @@ Contact @AsterDEX\\_Support or visit docs.aster.exchange for detailed guides.
         orderId: result.tranId
       });
 
-    } catch (error) {
+    } catch (error: any) {
       console.error('Transfer execution error:', error);
-      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-      await ctx.reply(`❌ **Transfer Failed**\n\n${errorMessage}\n\nPlease check your balance and try again.`);
+      
+      if (error.code === 'TRANSFER_NOT_IMPLEMENTED') {
+        const notImplementedText = [
+          `⚠️ **Transfer Feature Under Development**`,
+          '',
+          `🚧 The transfer functionality between Spot and Futures accounts is not yet available on the Aster DEX API.`,
+          '',
+          `**In the meantime, you can:**`,
+          `• Deposit USDT directly to your Futures account`,
+          `• Use external transfers through the Aster DEX web interface`,
+          `• Contact @AsterDEX_Support for manual transfers`,
+          '',
+          `🔄 This feature will be available soon in a future update.`
+        ].join('\n');
+
+        const keyboard = Markup.inlineKeyboard([
+          [
+            Markup.button.callback('💰 View Balances', 'transfer_menu'),
+            Markup.button.callback('📊 Trade Instead', 'trade_perps')
+          ],
+          [
+            Markup.button.callback('🏠 Main Menu', 'main_menu')
+          ]
+        ]);
+
+        await ctx.reply(notImplementedText, { parse_mode: 'Markdown', ...keyboard });
+      } else {
+        const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+        await ctx.reply(`❌ **Transfer Failed**\n\n${errorMessage}\n\nPlease check your balance and try again.`);
+      }
     }
   }
 
