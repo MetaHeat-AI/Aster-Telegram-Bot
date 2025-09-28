@@ -48,7 +48,7 @@ A production-grade Telegram bot for trading Aster DEX Perpetual futures with BON
    ```
    BOT_TOKEN=your_bot_token_from_botfather
    DATABASE_URL=auto_configured_by_render
-   REQUIRED_CHANNEL_ID=-1002468135790
+   REQUIRED_CHANNEL_ID=-1003157642542
    ENCRYPTION_KEY=generate_32_char_random_key
    NODE_ENV=production
    ```
