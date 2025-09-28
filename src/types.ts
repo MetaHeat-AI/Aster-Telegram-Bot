@@ -398,6 +398,8 @@ export interface UserState {
       tradingType?: 'spot' | 'perps';
       action?: string;
       symbol?: string;
+      mode?: 'spot' | 'perps';
+      side?: 'BUY' | 'SELL';
     };
     type?: 'expecting_stop_loss' | 'expecting_take_profit' | 'expecting_margin';
     symbol?: string;

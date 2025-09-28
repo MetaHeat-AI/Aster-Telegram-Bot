@@ -706,7 +706,7 @@ export class BotOrchestrator {
       }
       
       // Check if expecting custom amount input
-      if ((ctx.userState as any)?.expectingCustomAmount) {
+      if (ctx.userState?.conversationState?.step === 'waiting_custom_amount') {
         this.handleCustomAmountText(ctx, ctx.message.text);
         return;
       }
@@ -3471,9 +3471,14 @@ Contact @AsterDEX\\_Support or visit docs.aster.exchange for detailed guides.
 
       await ctx.editMessageText(customText, { parse_mode: 'Markdown', ...keyboard });
 
-      // Set conversation state
+      // Set conversation state for persistent storage
       if (ctx.userState) {
-        (ctx.userState as any).expectingCustomAmount = { mode, side, symbol };
+        const conversationState = {
+          step: 'waiting_custom_amount' as const,
+          data: { mode, side, symbol }
+        };
+        ctx.userState.conversationState = conversationState;
+        await this.authMiddleware.setConversationState(ctx.userState.telegramId, conversationState);
       }
 
     } catch (error) {
@@ -3486,13 +3491,20 @@ Contact @AsterDEX\\_Support or visit docs.aster.exchange for detailed guides.
    * Handle custom amount text input
    */
   private async handleCustomAmountText(ctx: BotContext, text: string): Promise<void> {
-    const customAmountState = (ctx.userState as any)?.expectingCustomAmount;
-    if (!customAmountState) return;
+    const conversationState = ctx.userState?.conversationState;
+    if (!conversationState?.data) return;
 
     // Clear conversation state
-    delete (ctx.userState as any).expectingCustomAmount;
+    ctx.userState!.conversationState = undefined;
+    await this.authMiddleware.clearConversationState(ctx.userState!.telegramId);
 
-    const { mode, side, symbol } = customAmountState;
+    const { mode, side, symbol } = conversationState.data;
+
+    // Validate required data
+    if (!mode || !side || !symbol) {
+      await ctx.reply('❌ **Invalid Session**\n\nPlease start the trading process again.');
+      return;
+    }
 
     try {
       // Parse the input
