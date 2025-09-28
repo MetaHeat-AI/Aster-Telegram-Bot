@@ -22,7 +22,7 @@ A production-grade Telegram bot for trading Aster DEX Perpetual futures with BON
 
 ### 🔐 Security & Privacy
 - **Encrypted Credentials**: AES-256-GCM encryption for API keys
-- **Secure Sessions**: JWT-based authentication
+- **Channel Access Control**: Beta testers only via Telegram group membership
 - **Rate Limiting**: Built-in protection against API abuse
 - **Audit Logging**: Complete transaction and action logging
 
@@ -46,10 +46,9 @@ A production-grade Telegram bot for trading Aster DEX Perpetual futures with BON
 3. **Connect your GitHub repository**
 4. **Add Environment Variables**:
    ```
-   TELEGRAM_BOT_TOKEN=your_bot_token_from_botfather
-   TG_BOT_TOKEN=your_bot_token_from_botfather
-   ASTER_API_KEY=your_aster_api_key
-   ASTER_API_SECRET=your_aster_api_secret  
+   BOT_TOKEN=your_bot_token_from_botfather
+   DATABASE_URL=auto_configured_by_render
+   REQUIRED_CHANNEL_ID=-1002468135790
    ENCRYPTION_KEY=generate_32_char_random_key
    NODE_ENV=production
    ```
