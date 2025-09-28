@@ -1,0 +1,10 @@
+start - 🚀 Start the bot and get welcome message
+menu - 📋 Open main trading menu
+trade - 💹 Quick access to trading interface
+portfolio - 💼 View your portfolio and positions
+positions - 📊 Check your open positions
+prices - 📈 Check current market prices
+settings - ⚙️ Configure bot preferences and trading limits
+link - 🔗 Link your API credentials securely
+unlink - 🔓 Remove your API credentials
+help - ❓ Get help and feature overview

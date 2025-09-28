@@ -12,34 +12,44 @@ export class NavigationHandler extends BaseHandler {
       ctx,
       async () => {
         const welcomeText = `
-**Welcome to AsterBot — Your Aster Telegram Terminal**
+🚀 **Welcome to AsterBot — Your Professional Trading Terminal**
 
-Trade Aster DEX directly on Telegram, faster, more convenient and always at your fingertips. Execute trades instantly, manage positions in real time, receive live alerts, and control your wallets without switching platforms. All powered via the official @aster\\_Dex API
+Trade Aster DEX directly from Telegram with professional-grade tools. Execute trades instantly, manage positions in real-time, and control your portfolio without switching platforms.
 
-• 🔒 **Secure API Execution** — Your keys, your control
-• ✅ **Spot & Perpetual Trading** — Access the full market
-• 🛡️ **Price & Slippage Protection** — Powered by Aster
-• 🦅 **Real-Time P&L & Position Tracking**
-• 💰 **Custom Trade Amounts & Natural Language Input**
-• 🔔⭐️ **One-Click Market Watch**
-• 🔥 **Zero Fees**
-• 🏆 **Earn Rewards & Points for Airdrops on the go**
+✨ **Core Features:**
+• 🔒 **Secure API Integration** — Your keys, your control
+• 💹 **Spot & Perpetual Trading** — Full market access
+• 🛡️ **Advanced TP/SL** — Professional risk management
+• 📊 **Real-Time Portfolio** — Live P&L tracking
+• 💰 **Custom Amounts** — Natural language input
+• 📈 **Market Watch** — Price alerts & analysis
+• 🎯 **Zero Trading Fees** — Maximum profit retention
 
-⚠️ **Disclaimer:** You can always create a test wallet first to explore features.
+🎯 **Quick Navigation:**
+Use the **Menu Button** (≡) or type **/** for quick commands like:
+\`/trade\` • \`/portfolio\` • \`/prices\` • \`/settings\`
 
-**Choose an action below to get started**
+⚠️ **New User?** Start with \`/link\` to securely connect your API credentials
+
+**Choose an action below to get started:**
         `.trim();
 
         const keyboard = Markup.inlineKeyboard([
           [
-            Markup.button.callback('🚀 Get Started', 'main_menu')
-          ],
-          [
-            Markup.button.callback('📈 Start Trading', 'unified_trade'),
+            Markup.button.callback('🚀 Get Started', 'main_menu'),
             Markup.button.callback('🔗 Link API', 'link_api')
           ],
           [
-            Markup.button.callback('📖 Help & Docs', 'help')
+            Markup.button.callback('💹 Trade Now', 'unified_trade'),
+            Markup.button.callback('💼 Portfolio', 'portfolio')
+          ],
+          [
+            Markup.button.callback('📊 Market Prices', 'prices'),
+            Markup.button.callback('⚙️ Settings', 'settings')
+          ],
+          [
+            Markup.button.callback('📖 Help & Guide', 'help'),
+            Markup.button.callback('ℹ️ Commands', 'show_commands')
           ]
         ]);
         

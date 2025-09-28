@@ -155,6 +155,9 @@ export class BotOrchestrator {
         context: { type: 'bot_error' }
       });
     });
+
+    // Setup bot commands menu
+    this.setupBotCommands();
     
     console.log('[Orchestrator] Bot setup complete');
   }
@@ -327,6 +330,11 @@ export class BotOrchestrator {
     // Trading menu
     this.bot.action('unified_trade', (ctx) => 
       this.navigationHandler.showTradingMenu(ctx)
+    );
+
+    // Show commands menu
+    this.bot.action('show_commands', (ctx) => 
+      this.showCommandsMenu(ctx)
     );
 
     // Spot trading
@@ -5114,5 +5122,101 @@ Contact @AsterDEX\\_Support or visit docs.aster.exchange for detailed guides.
     
     console.log('Bot stopped gracefully');
     process.exit(0);
+  }
+
+  /**
+   * Setup bot commands menu that appears when users type '/' 
+   */
+  private async setupBotCommands(): Promise<void> {
+    try {
+      const commands = [
+        { command: 'start', description: '🚀 Start the bot and get welcome message' },
+        { command: 'menu', description: '📋 Open main trading menu' },
+        { command: 'trade', description: '💹 Quick access to trading interface' },
+        { command: 'portfolio', description: '💼 View your portfolio and positions' },
+        { command: 'positions', description: '📊 Check your open positions' },
+        { command: 'prices', description: '📈 Check current market prices' },
+        { command: 'settings', description: '⚙️ Configure bot preferences and trading limits' },
+        { command: 'link', description: '🔗 Link your API credentials securely' },
+        { command: 'unlink', description: '🔓 Remove your API credentials' },
+        { command: 'help', description: '❓ Get help and feature overview' }
+      ];
+
+      await this.bot.telegram.setMyCommands(commands);
+      console.log('[Bot] Commands menu setup successfully');
+
+      // Also setup the persistent menu button
+      await this.setupMenuButton();
+    } catch (error) {
+      console.error('[Bot] Failed to setup commands menu:', error);
+    }
+  }
+
+  /**
+   * Setup persistent menu button for quick access
+   */
+  private async setupMenuButton(): Promise<void> {
+    try {
+      await this.bot.telegram.setChatMenuButton({
+        menuButton: { type: 'commands' }
+      });
+      console.log('[Bot] Menu button setup successfully');
+    } catch (error) {
+      console.error('[Bot] Failed to setup menu button:', error);
+    }
+  }
+
+  /**
+   * Show available commands and navigation help
+   */
+  private async showCommandsMenu(ctx: BotContext): Promise<void> {
+    const commandsText = [
+      '⚡ **Quick Commands Reference**',
+      '',
+      '🚀 **Essential Commands:**',
+      '• `/start` — Welcome message & main menu',
+      '• `/menu` — Main trading dashboard',
+      '• `/trade` — Quick access to trading',
+      '• `/link` — Connect your API credentials',
+      '',
+      '📊 **Portfolio & Analysis:**',
+      '• `/portfolio` — View your portfolio',
+      '• `/positions` — Check open positions',
+      '• `/prices` — Current market prices',
+      '',
+      '⚙️ **Settings & Help:**',
+      '• `/settings` — Bot preferences & limits',
+      '• `/unlink` — Remove API credentials',
+      '• `/help` — Detailed help guide',
+      '',
+      '💡 **Pro Tips:**',
+      '• Use the **Menu Button** (≡) for quick access',
+      '• Type `/` to see all available commands',
+      '• Commands work from any conversation state'
+    ].join('\n');
+
+    const keyboard = Markup.inlineKeyboard([
+      [
+        Markup.button.callback('🚀 Get Started', 'main_menu'),
+        Markup.button.callback('💹 Trade Now', 'unified_trade')
+      ],
+      [
+        Markup.button.callback('🔗 Link API', 'link_api'),
+        Markup.button.callback('📖 Help Guide', 'help')
+      ]
+    ]);
+
+    try {
+      await ctx.editMessageText(commandsText, { 
+        parse_mode: 'Markdown', 
+        ...keyboard 
+      });
+    } catch (error) {
+      // Fallback to reply if edit fails
+      await ctx.reply(commandsText, { 
+        parse_mode: 'Markdown', 
+        ...keyboard 
+      });
+    }
   }
 }
