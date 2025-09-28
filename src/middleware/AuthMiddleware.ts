@@ -12,10 +12,16 @@ export class AuthMiddleware {
   private db: DatabaseManager;
   private eventEmitter: BotEventEmitter;
   private readonly REQUIRED_CHANNEL_ID = process.env.REQUIRED_CHANNEL_ID || '';
+  private readonly DISABLE_CHANNEL_CHECK = process.env.DISABLE_CHANNEL_CHECK === 'true';
 
   constructor(db: DatabaseManager, eventEmitter: BotEventEmitter) {
     this.db = db;
     this.eventEmitter = eventEmitter;
+    
+    console.log(`[Auth] Channel gate configuration:`, {
+      channelId: this.REQUIRED_CHANNEL_ID,
+      disabled: this.DISABLE_CHANNEL_CHECK
+    });
   }
 
   /**
@@ -35,8 +41,14 @@ export class AuthMiddleware {
         }
 
         // Check channel membership first (if configured)
-        if (this.REQUIRED_CHANNEL_ID && !(await this.checkChannelMembership(ctx))) {
-          return; // Access denied message already sent
+        if (this.REQUIRED_CHANNEL_ID && !this.DISABLE_CHANNEL_CHECK) {
+          console.log(`[Auth] Channel check enabled with ID: ${this.REQUIRED_CHANNEL_ID}`);
+          const hasAccess = await this.checkChannelMembership(ctx);
+          if (!hasAccess) {
+            return; // Access denied message already sent
+          }
+        } else {
+          console.log(`[Auth] Channel check disabled - REQUIRED_CHANNEL_ID: ${this.REQUIRED_CHANNEL_ID}, DISABLED: ${this.DISABLE_CHANNEL_CHECK}`);
         }
 
         const telegramId = ctx.from?.id;
@@ -190,27 +202,40 @@ export class AuthMiddleware {
   private async checkChannelMembership(ctx: BotContext): Promise<boolean> {
     if (!ctx.from?.id) return false;
 
+    console.log(`[Auth] Checking membership for user ${ctx.from.id} in channel ${this.REQUIRED_CHANNEL_ID}`);
+
     try {
       // Get chat member status
       const member = await ctx.telegram.getChatMember(this.REQUIRED_CHANNEL_ID, ctx.from.id);
+      
+      console.log(`[Auth] User ${ctx.from.id} status: ${member.status}`);
       
       // Check if user is an active member
       const validStatuses = ['creator', 'administrator', 'member'];
       const isValidMember = validStatuses.includes(member.status);
       
       if (!isValidMember) {
+        console.log(`[Auth] User ${ctx.from.id} access denied - status: ${member.status}`);
         await this.sendAccessDeniedMessage(ctx);
         return false;
       }
 
-      console.log(`[Auth] User ${ctx.from.id} verified as channel member`);
+      console.log(`[Auth] User ${ctx.from.id} verified as channel member with status: ${member.status}`);
       return true;
-    } catch (error) {
+    } catch (error: any) {
       console.error('[Auth] Channel membership check failed:', error);
+      console.error('[Auth] Error details:', {
+        channelId: this.REQUIRED_CHANNEL_ID,
+        userId: ctx.from.id,
+        errorMessage: error.message,
+        errorCode: error.code
+      });
       
       // If API fails, show informative message
       await ctx.reply(
         '⚠️ **Access Verification Failed**\n\n' +
+        `Debug Info: Channel ${this.REQUIRED_CHANNEL_ID}, User ${ctx.from.id}\n` +
+        `Error: ${error.message}\n\n` +
         'Unable to verify your channel membership. Please try again in a moment.\n\n' +
         'If the problem persists, make sure you\'re a member of our StableSolid beta test group.',
         { parse_mode: 'Markdown' }
@@ -220,22 +245,16 @@ export class AuthMiddleware {
   }
 
   /**
-   * Send access denied message with channel join instructions
+   * Send access denied message with StableSolid branding
    */
   private async sendAccessDeniedMessage(ctx: BotContext): Promise<void> {
     const accessDeniedText = [
-      '🔒 **Access Required**',
+      '⚠️ **StableSolid: Entry Denied!**',
+      '**Verification required**',
       '',
-      'To use this bot, you need to be a member of our beta test group.',
+      'This beta is gated. Make sure you\'re a member of our beta test group.',
       '',
-      '**How to get access:**',
-      '1. Join our StableSolid beta test group',
-      '2. Use this invite link: https://t.me/+T4KTNlGT4dEwMzc9',
-      '3. Come back and try the bot again',
-      '',
-      '💡 **Why?** This ensures beta testers get important updates and can provide feedback.',
-      '',
-      '🔄 After joining, type /start to begin!'
+      'Follow & DM **x.com/stableSolid** to gain access and tap into the revenue stream.'
     ].join('\n');
 
     await ctx.reply(accessDeniedText, { parse_mode: 'Markdown' });
