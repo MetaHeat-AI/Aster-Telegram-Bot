@@ -225,35 +225,32 @@ export class AuthMiddleware {
   private async checkChannelMembershipAndReferral(ctx: BotContext): Promise<boolean> {
     if (!ctx.from?.id) return false;
 
-    // First check if user has referral access (let referral users access even if not in channel yet)
-    const hasReferralAccess = await this.checkReferralAccess(ctx.from.id);
-    if (hasReferralAccess) {
-      // User has referral access, now check channel membership
-      const isChannelMember = await this.checkChannelMembership(ctx);
-      if (!isChannelMember) {
-        // User has valid referral but not in channel - prompt to join
-        await this.sendJoinChannelMessage(ctx);
-        return false;
-      }
-      return true; // Has both referral access and channel membership
-    }
-
-    // Check if user is an admin in the channel (admins bypass referral requirement)
+    // First check channel membership - all group members get access
     const isChannelMember = await this.checkChannelMembership(ctx);
     if (isChannelMember) {
+      console.log(`[Auth] User ${ctx.from.id} is group member - access granted`);
+      // Update user as group member in database
+      await this.db.updateUserAdminStatus(ctx.from.id, false); // Mark as group member (not necessarily admin)
+      
+      // Check if they're also an admin and update accordingly
       const isAdmin = await this.checkIfGroupAdmin(ctx);
       if (isAdmin) {
-        console.log(`[Auth] User ${ctx.from.id} is admin - bypassing referral check`);
-        return true;
+        console.log(`[Auth] User ${ctx.from.id} is also an admin`);
       }
+      
+      return true; // All group members get access
     }
 
-    // User has neither referral access nor admin status
-    if (!isChannelMember) {
-      await this.sendAccessDeniedMessage(ctx);
-    } else {
-      await this.sendReferralRequiredMessage(ctx);
+    // User is not in the group - check if they have referral access
+    const hasReferralAccess = await this.checkReferralAccess(ctx.from.id);
+    if (hasReferralAccess) {
+      // User has valid referral but not in channel - prompt to join for full experience
+      await this.sendJoinChannelMessage(ctx);
+      return false;
     }
+
+    // User has no group membership and no referral access
+    await this.sendReferralRequiredMessage(ctx);
     return false;
   }
 
@@ -353,7 +350,8 @@ export class AuthMiddleware {
   }
 
   /**
-   * Check if user has referral access (either was invited, is admin, or has own code)
+   * Check if user has referral access (either was invited or has own code)
+   * Note: Group membership is checked separately and grants automatic access
    */
   private async checkReferralAccess(telegramId: number): Promise<boolean> {
     try {
@@ -362,9 +360,9 @@ export class AuthMiddleware {
 
       // Check if user has referral access:
       // 1. Was invited by someone (has invited_by)
-      // 2. Is group admin
-      // 3. Has generated their own referral code (existing user)
-      return user.invited_by !== null || user.is_group_admin === true || user.referral_code !== null;
+      // 2. Has generated their own referral code (existing user)
+      // Note: is_group_admin is not checked here as group membership is handled separately
+      return user.invited_by !== null || user.referral_code !== null;
     } catch (error) {
       console.error('[Auth] Referral access check failed:', error);
       return false;
@@ -376,17 +374,19 @@ export class AuthMiddleware {
    */
   private async sendReferralRequiredMessage(ctx: BotContext): Promise<void> {
     const referralText = [
-      '🎫 **StableSolid: Invite Required**',
+      '🎫 **StableSolid: Access Required**',
       '',
-      'This is an **invite-only beta**. You need a referral code to access the trading terminal.',
+      'To access the trading terminal, you need either:',
       '',
-      '💡 **How to get access:**',
+      '👥 **Option 1: Join our beta group** (Instant access)',
+      '• Join: https://t.me/+T4KTNlGT4dEwMzc9',
+      '• All group members get automatic access',
+      '',
+      '🎟️ **Option 2: Use a referral code**',
       '• Get an invite code from an existing user',
       '• Use `/start SS_CODE_HERE` with your referral code',
       '',
-      '🔗 **Already have a code?** Use `/start` followed by your code',
-      '',
-      '📱 *Follow @stableSolid for updates*'
+      '💡 *Group membership = No referral code needed!*'
     ].join('\n');
 
     await ctx.reply(referralText, { parse_mode: 'Markdown' });
@@ -399,15 +399,16 @@ export class AuthMiddleware {
     const joinChannelText = [
       '✅ **Referral Code Verified!**',
       '',
-      'Your referral access has been confirmed. To complete setup:',
+      'Your referral access has been confirmed.',
       '',
-      '📱 **Next Step: Join our beta test group**',
-      '• This unlocks full trading terminal access',
+      '📱 **Recommended: Join our beta test group**',
+      '• Get instant access without referral codes',
       '• Connect with other traders and get updates',
+      '• Priority support and feature announcements',
       '',
       '🔗 **Join here:** https://t.me/+T4KTNlGT4dEwMzc9',
       '',
-      '💡 *After joining, return here to start trading!*'
+      '💡 *Group members get automatic bot access!*'
     ].join('\n');
 
     await ctx.reply(joinChannelText, { parse_mode: 'Markdown' });
@@ -458,7 +459,7 @@ export class AuthMiddleware {
       }
 
       // Check if user already has referral access
-      if (user.invited_by !== null || user.is_group_admin || user.referral_code !== null) {
+      if (user.invited_by !== null || user.referral_code !== null) {
         return {
           success: true,
           message: '✅ You already have access to the StableSolid trading terminal!'
