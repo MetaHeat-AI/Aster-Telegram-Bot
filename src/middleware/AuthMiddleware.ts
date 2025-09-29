@@ -40,10 +40,27 @@ export class AuthMiddleware {
           return next();
         }
 
-        // IGNORE ALL GROUP MESSAGES - Bot should only work in private chats
+        // Handle group messages - only respond to direct mentions with greeting
         if (ctx.chat?.type !== 'private') {
-          console.log(`[Auth] Ignoring ${ctx.chat?.type} chat - bot only works in private messages`);
-          return; // Silent ignore - no response in groups
+          console.log(`[Auth] ${ctx.chat?.type} chat detected`);
+          
+          // Check if bot was mentioned directly
+          const message = 'message' in ctx.update ? ctx.update.message : null;
+          const botUsername = ctx.botInfo?.username;
+          
+          if (message && 'text' in message && botUsername) {
+            const wasMentioned = message.text?.includes(`@${botUsername}`) || 
+                               message.entities?.some(entity => 
+                                 entity.type === 'mention' && 
+                                 message.text?.substring(entity.offset, entity.offset + entity.length) === `@${botUsername}`
+                               );
+            
+            if (wasMentioned) {
+              await this.sendGroupGreeting(ctx);
+            }
+          }
+          
+          return; // Don't continue with normal auth flow
         }
 
         // Check channel membership first (if configured)
@@ -247,6 +264,30 @@ export class AuthMiddleware {
         { parse_mode: 'Markdown' }
       );
       return false;
+    }
+  }
+
+  /**
+   * Send greeting message when mentioned in groups
+   */
+  private async sendGroupGreeting(ctx: BotContext): Promise<void> {
+    const greetingText = [
+      '👋 **Hey there!**',
+      '',
+      'I\'m the **StableSolid Trading Bot** - your professional Aster DEX terminal.',
+      '',
+      '🚀 **For trading access:** Message me privately @' + (ctx.botInfo?.username || 'this_bot'),
+      '📊 **Features:** Spot & Perp trading, TP/SL, portfolio tracking',
+      '🔒 **Secure:** Your keys, your control',
+      '',
+      '💬 *I only provide trading services in private chats to keep this group clean.*'
+    ].join('\n');
+
+    try {
+      await ctx.reply(greetingText, { parse_mode: 'Markdown' });
+      console.log(`[Auth] Sent group greeting in chat ${ctx.chat?.id}`);
+    } catch (error) {
+      console.error('[Auth] Failed to send group greeting:', error);
     }
   }
 
