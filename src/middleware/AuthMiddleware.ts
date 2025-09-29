@@ -40,6 +40,12 @@ export class AuthMiddleware {
           return next();
         }
 
+        // IGNORE ALL GROUP MESSAGES - Bot should only work in private chats
+        if (ctx.chat?.type !== 'private') {
+          console.log(`[Auth] Ignoring ${ctx.chat?.type} chat - bot only works in private messages`);
+          return; // Silent ignore - no response in groups
+        }
+
         // Check channel membership first (if configured)
         if (this.REQUIRED_CHANNEL_ID && !this.DISABLE_CHANNEL_CHECK) {
           console.log(`[Auth] Channel check enabled with ID: ${this.REQUIRED_CHANNEL_ID}`);
