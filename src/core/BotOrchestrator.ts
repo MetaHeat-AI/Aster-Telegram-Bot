@@ -5269,7 +5269,7 @@ Contact @AsterDEX\\_Support or visit docs.aster.exchange for detailed guides.
   }
 
   /**
-   * Handle start command with optional referral code
+   * Handle start command - always show welcome message
    */
   private async handleStartCommand(ctx: BotContext): Promise<void> {
     const telegramId = ctx.from?.id;
@@ -5299,16 +5299,8 @@ Contact @AsterDEX\\_Support or visit docs.aster.exchange for detailed guides.
       return;
     }
 
-    // No referral code provided, check if user has access
-    const hasAccess = await this.checkUserAccess(telegramId);
-    
-    if (hasAccess) {
-      // User has access, show normal welcome message
-      await this.navigationHandler.showWelcomeMessage(ctx);
-    } else {
-      // User needs access, ask for referral code
-      await this.askForReferralCode(ctx);
-    }
+    // Always show welcome message on /start (regardless of access)
+    await this.navigationHandler.showWelcomeMessage(ctx);
   }
 
   /**

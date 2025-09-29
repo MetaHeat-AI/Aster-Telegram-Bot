@@ -35,8 +35,21 @@ export class AuthMiddleware {
         // Generate correlation ID for request tracking
         ctx.correlationId = this.generateCorrelationId();
         
-        // Skip authentication for certain commands
+        // Always allow /start and /help commands to pass through
         if (this.shouldSkipAuth(ctx)) {
+          // Still load user state for /start command for referral processing
+          const telegramId = ctx.from?.id;
+          if (telegramId) {
+            ctx.userState = await this.loadUserState(telegramId);
+            // Restore conversation state from database
+            if (ctx.userState) {
+              const storedConversationState = await this.db.getConversationState(ctx.userState.userId);
+              if (storedConversationState) {
+                ctx.userState.conversationState = storedConversationState;
+                console.log(`[Auth] Restored conversation state: ${storedConversationState.step}`);
+              }
+            }
+          }
           return next();
         }
 
@@ -63,9 +76,10 @@ export class AuthMiddleware {
           return; // Don't continue with normal auth flow
         }
 
-        // Check channel membership and referral access (if configured)
+        // For non-/start commands, check access if channel check is enabled
+        // Note: /start and /help are already handled above and skip this check
         if (this.REQUIRED_CHANNEL_ID && !this.DISABLE_CHANNEL_CHECK) {
-          console.log(`[Auth] Channel check enabled with ID: ${this.REQUIRED_CHANNEL_ID}`);
+          console.log(`[Auth] Checking access for non-start command with channel ID: ${this.REQUIRED_CHANNEL_ID}`);
           const hasAccess = await this.checkChannelMembershipAndReferral(ctx);
           if (!hasAccess) {
             return; // Access denied message already sent
@@ -172,6 +186,22 @@ export class AuthMiddleware {
   }
 
   /**
+   * Check access for feature usage (buttons, commands)
+   * Returns true if access granted, false if denied
+   */
+  async checkFeatureAccess(ctx: BotContext): Promise<boolean> {
+    // If channel check is disabled, grant access
+    if (!this.REQUIRED_CHANNEL_ID || this.DISABLE_CHANNEL_CHECK) {
+      return true;
+    }
+
+    if (!ctx.from?.id) return false;
+
+    // Check channel membership and referral access
+    return await this.checkChannelMembershipAndReferral(ctx);
+  }
+
+  /**
    * Load user state from database
    */
   private async loadUserState(telegramId: number): Promise<UserState | undefined> {
@@ -208,15 +238,25 @@ export class AuthMiddleware {
   }
 
   /**
-   * Check if we should skip authentication for certain commands
+   * Check if we should skip authentication for certain commands and text inputs
    */
   private shouldSkipAuth(ctx: Context): boolean {
+    // Always allow /start and /help commands
     const text = 'message' in ctx.update && 'text' in ctx.update.message 
       ? ctx.update.message.text 
       : '';
     
     const skipCommands = ['/start', '/help'];
-    return skipCommands.some(cmd => text?.startsWith(cmd));
+    if (skipCommands.some(cmd => text?.startsWith(cmd))) {
+      return true;
+    }
+
+    // Also allow text messages that might be referral codes for users waiting for them
+    if ('message' in ctx.update && 'text' in ctx.update.message && text && !text.startsWith('/')) {
+      return true; // Allow text input (for referral codes and other conversation flows)
+    }
+
+    return false;
   }
 
   /**
@@ -244,9 +284,8 @@ export class AuthMiddleware {
     // User is not in the group - check if they have referral access
     const hasReferralAccess = await this.checkReferralAccess(ctx.from.id);
     if (hasReferralAccess) {
-      // User has valid referral but not in channel - prompt to join for full experience
-      await this.sendJoinChannelMessage(ctx);
-      return false;
+      console.log(`[Auth] User ${ctx.from.id} has referral access - access granted`);
+      return true; // Users with referral access get full access
     }
 
     // User has no group membership and no referral access
@@ -373,45 +412,51 @@ export class AuthMiddleware {
    * Send referral required message
    */
   private async sendReferralRequiredMessage(ctx: BotContext): Promise<void> {
+    const telegramId = ctx.from?.id;
     const referralText = [
       '🎫 **SolidState: Access Required**',
       '',
-      'To access the trading terminal, you need either:',
+      'To access the trading features, please share your referral code.',
       '',
-      '👥 **Option 1: Join our beta group** (Instant access)',
-      '• Join: https://t.me/+T4KTNlGT4dEwMzc9',
-      '• All group members get automatic access',
+      '💬 **Type your referral code now:**',
+      '• Format: SS_USERNAME_1234',
+      '• Get a code from an existing SolidState user',
       '',
-      '🎟️ **Option 2: Use a referral code**',
-      '• Get an invite code from an existing user',
-      '• Use `/start SS_CODE_HERE` with your referral code',
-      '',
-      '💡 *Group membership = No referral code needed!*'
+      '🔄 **Or use:** `/start SS_CODE_HERE`'
     ].join('\n');
 
     await ctx.reply(referralText, { parse_mode: 'Markdown' });
+
+    // Set conversation state to wait for referral code
+    if (telegramId) {
+      try {
+        const conversationState = {
+          step: 'waiting_referral_code' as const,
+          data: { action: 'referral_input' as const }
+        };
+        await this.setConversationState(telegramId, conversationState);
+        console.log(`[Auth] Set conversation state for referral input: ${telegramId}`);
+      } catch (error) {
+        console.error('[Auth] Failed to set conversation state:', error);
+      }
+    }
   }
 
   /**
    * Send join channel message for users with valid referral but not in channel
    */
   private async sendJoinChannelMessage(ctx: BotContext): Promise<void> {
-    const joinChannelText = [
+    const verifiedText = [
       '✅ **Referral Code Verified!**',
       '',
       'Your referral access has been confirmed.',
       '',
-      '📱 **Recommended: Join our beta test group**',
-      '• Get instant access without referral codes',
-      '• Connect with other traders and get updates',
-      '• Priority support and feature announcements',
+      '🚀 **You now have full access to SolidState trading features!**',
       '',
-      '🔗 **Join here:** https://t.me/+T4KTNlGT4dEwMzc9',
-      '',
-      '💡 *Group members get automatic bot access!*'
+      '💡 *Use /start to see all available options*'
     ].join('\n');
 
-    await ctx.reply(joinChannelText, { parse_mode: 'Markdown' });
+    await ctx.reply(verifiedText, { parse_mode: 'Markdown' });
   }
 
   /**
