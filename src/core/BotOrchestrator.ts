@@ -741,6 +741,12 @@ export class BotOrchestrator {
       console.log(`[Text] Received: ${ctx.message.text} from user ${ctx.userState?.userId}`);
       console.log(`[Text] Conversation state: ${ctx.userState?.conversationState?.step || 'none'}`);
       
+      // Check if expecting referral code input
+      if (ctx.userState?.conversationState?.step === 'waiting_referral_code') {
+        await this.handleReferralCodeText(ctx, ctx.message.text);
+        return;
+      }
+      
       // Check if expecting custom pair input
       if ((ctx.userState as any)?.expectingCustomPair) {
         this.handleCustomPairText(ctx, ctx.message.text);
@@ -5290,9 +5296,18 @@ Contact @AsterDEX\\_Support or visit docs.aster.exchange for detailed guides.
           this.navigationHandler.showWelcomeMessage(ctx);
         }, 2000);
       }
-    } else {
-      // No referral code, show normal welcome message
+      return;
+    }
+
+    // No referral code provided, check if user has access
+    const hasAccess = await this.checkUserAccess(telegramId);
+    
+    if (hasAccess) {
+      // User has access, show normal welcome message
       await this.navigationHandler.showWelcomeMessage(ctx);
+    } else {
+      // User needs access, ask for referral code
+      await this.askForReferralCode(ctx);
     }
   }
 
@@ -5709,6 +5724,133 @@ Contact @AsterDEX\\_Support or visit docs.aster.exchange for detailed guides.
     } catch (error) {
       console.error('[Orchestrator] Team level view failed:', error);
       await ctx.reply('❌ Failed to load team level data. Please try again later.');
+    }
+  }
+
+  /**
+   * Check if user has access (group membership or referral)
+   */
+  private async checkUserAccess(telegramId: number): Promise<boolean> {
+    try {
+      // Create a mock context to check access
+      const mockCtx = {
+        from: { id: telegramId },
+        telegram: null // We'll use direct database checks instead
+      };
+
+      // Check if user is in the group or has referral access
+      const user = await this.db.getUserByTelegramId(telegramId);
+      if (!user) return false;
+
+      // Check referral access (invited_by or own referral_code)
+      if (user.invited_by !== null || user.referral_code !== null) {
+        return true;
+      }
+
+      // Note: We can't easily check group membership here without telegram context
+      // So we'll assume if they don't have referral access, they need to provide a code
+      // The actual group membership check will happen in the auth middleware later
+      return false;
+    } catch (error) {
+      console.error('[Orchestrator] Access check failed:', error);
+      return false;
+    }
+  }
+
+  /**
+   * Ask user for referral code and set conversation state
+   */
+  private async askForReferralCode(ctx: BotContext): Promise<void> {
+    const telegramId = ctx.from?.id;
+    if (!telegramId) return;
+
+    try {
+      const accessMessage = [
+        '🚀 **Welcome to StableSolid Trading Bot!**',
+        '',
+        'To access the professional trading terminal, you need either:',
+        '',
+        '👥 **Option 1: Join our beta group** (Instant access)',
+        '• Join: https://t.me/+T4KTNlGT4dEwMzc9',
+        '• All group members get automatic access',
+        '',
+        '🎟️ **Option 2: Use your referral code**',
+        '• If you have a referral code, just type it below',
+        '• Format: SS_USERNAME_1234',
+        '',
+        '💬 **Type your referral code now, or join the group for instant access!**'
+      ].join('\n');
+
+      await ctx.reply(accessMessage, { parse_mode: 'Markdown' });
+
+      // Set conversation state to wait for referral code
+      const conversationState = {
+        step: 'waiting_referral_code' as const,
+        data: { action: 'referral_input' as const }
+      };
+      
+      await this.authMiddleware.setConversationState(telegramId, conversationState);
+      console.log(`[Orchestrator] Set conversation state for referral input: ${telegramId}`);
+      
+    } catch (error) {
+      console.error('[Orchestrator] Failed to ask for referral code:', error);
+      await ctx.reply('❌ Something went wrong. Please try /start again.');
+    }
+  }
+
+  /**
+   * Handle referral code text input
+   */
+  private async handleReferralCodeText(ctx: BotContext, text: string): Promise<void> {
+    const telegramId = ctx.from?.id;
+    if (!telegramId) return;
+
+    try {
+      const referralCode = text.trim();
+      
+      // Clear conversation state first
+      await this.authMiddleware.clearConversationState(telegramId);
+      
+      console.log(`[Orchestrator] Processing referral code from text: ${referralCode} for user ${telegramId}`);
+      
+      // Process the referral code
+      const result = await this.authMiddleware.processReferralCode(telegramId, referralCode);
+      await ctx.reply(result.message, { parse_mode: 'Markdown' });
+      
+      if (result.success) {
+        // Show welcome message after successful referral
+        setTimeout(async () => {
+          await this.navigationHandler.showWelcomeMessage(ctx);
+        }, 2000);
+      } else {
+        // Failed - ask if they want to try again or join group
+        const retryMessage = [
+          '❌ That code didn\'t work.',
+          '',
+          '🔄 **Try again:**',
+          '• Double-check your referral code format (SS_USERNAME_1234)',
+          '• Make sure there are no extra spaces',
+          '',
+          '👥 **Or join our group for instant access:**',
+          'https://t.me/+T4KTNlGT4dEwMzc9',
+          '',
+          '💬 **Type another code or use /start to restart**'
+        ].join('\n');
+        
+        await ctx.reply(retryMessage, { parse_mode: 'Markdown' });
+        
+        // Set conversation state again to wait for another code
+        const conversationState = {
+          step: 'waiting_referral_code' as const,
+          data: { action: 'referral_input' as const }
+        };
+        await this.authMiddleware.setConversationState(telegramId, conversationState);
+      }
+      
+    } catch (error) {
+      console.error('[Orchestrator] Failed to handle referral code text:', error);
+      await ctx.reply('❌ Something went wrong processing your code. Please try /start again.');
+      await this.authMiddleware.clearConversationState(telegramId);
     }
   }
 }

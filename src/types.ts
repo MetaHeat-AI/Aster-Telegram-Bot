@@ -394,7 +394,7 @@ export interface UserState {
     isBlocked: boolean;
   };
   conversationState?: {
-    step: 'waiting_api_key' | 'waiting_api_secret' | 'waiting_pin' | 'confirming_unlink' | 'price' | 'amount' | 'waiting_custom_pair' | 'waiting_custom_amount';
+    step: 'waiting_api_key' | 'waiting_api_secret' | 'waiting_pin' | 'confirming_unlink' | 'price' | 'amount' | 'waiting_custom_pair' | 'waiting_custom_amount' | 'waiting_referral_code';
     data?: {
       apiKey?: string;
       pendingAction?: 'link' | 'unlink';
