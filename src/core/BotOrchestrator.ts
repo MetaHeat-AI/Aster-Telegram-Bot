@@ -5331,7 +5331,7 @@ Contact @AsterDEX\\_Support or visit docs.aster.exchange for detailed guides.
       const stats = await this.db.getUserReferralStats(ctx.userState.userId);
       
       const inviteText = [
-        '🎫 **Your StableSolid Referral Code**',
+        '🎫 **Your SolidState Referral Code**',
         '',
         `🔗 **Your Code:** \`${referralCode}\``,
         '',
@@ -5343,7 +5343,7 @@ Contact @AsterDEX\\_Support or visit docs.aster.exchange for detailed guides.
         `• Total invites sent: ${stats.referralCount}`,
         `• Successful signups: ${stats.referralCount}`,
         '',
-        '💡 **Pro tip:** Share your code with traders who want professional Aster DEX access!'
+        '💡 **Pro tip:** Share your code with traders who want professional AsterDEX access!'
       ].join('\n');
 
       const keyboard = Markup.inlineKeyboard([
@@ -5454,7 +5454,7 @@ Contact @AsterDEX\\_Support or visit docs.aster.exchange for detailed guides.
       ]);
 
       const teamText = [
-        '👥 **Your StableSolid Team**',
+        '👥 **Your SolidState Team**',
         '',
         '🏆 **Team Ranking**',
         `• Rank: #${rank.rank} ${rank.rank <= 10 ? '🥇' : rank.rank <= 50 ? '🥈' : '🥉'}`,
@@ -5530,7 +5530,7 @@ Contact @AsterDEX\\_Support or visit docs.aster.exchange for detailed guides.
           '',
           'Start building your team by sharing your referral code!',
           '',
-          '💡 Each referral helps grow the StableSolid community.'
+          '💡 Each referral helps grow the SolidState community.'
         ].join('\n');
 
         const keyboard = Markup.inlineKeyboard([
@@ -5766,7 +5766,7 @@ Contact @AsterDEX\\_Support or visit docs.aster.exchange for detailed guides.
 
     try {
       const accessMessage = [
-        '🚀 **Welcome to StableSolid Trading Bot!**',
+        '🚀 **Welcome to SolidState — The First & Fastest AsterDEX Trading Bot & Terminal!**',
         '',
         'To access the professional trading terminal, you need either:',
         '',

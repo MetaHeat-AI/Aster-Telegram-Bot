@@ -309,7 +309,7 @@ export class AuthMiddleware {
     const greetingText = [
       '👋 **Hey there!**',
       '',
-      'I\'m the **StableSolid Trading Bot** - your professional Aster DEX terminal.',
+      'I\'m **SolidState** - the first & fastest AsterDEX trading bot.',
       '',
       '🚀 **For trading access:** Message me privately @' + (ctx.botInfo?.username || 'this_bot'),
       '📊 **Features:** Spot & Perp trading, TP/SL, portfolio tracking',
@@ -374,7 +374,7 @@ export class AuthMiddleware {
    */
   private async sendReferralRequiredMessage(ctx: BotContext): Promise<void> {
     const referralText = [
-      '🎫 **StableSolid: Access Required**',
+      '🎫 **SolidState: Access Required**',
       '',
       'To access the trading terminal, you need either:',
       '',
@@ -419,12 +419,12 @@ export class AuthMiddleware {
    */
   private async sendAccessDeniedMessage(ctx: BotContext): Promise<void> {
     const accessDeniedText = [
-      '⚠️ **StableSolid: Entry Denied!**',
+      '⚠️ **SolidState: Entry Denied!**',
       '**Verification required**',
       '',
       'This beta is gated. Make sure you\'re a member of our beta test group.',
       '',
-      'Follow & DM **x.com/stableSolid** to gain access and tap into the revenue stream.'
+      'Follow & DM **x.com/stablesolid** to gain access and tap into the revenue stream.'
     ].join('\n');
 
     await ctx.reply(accessDeniedText, { parse_mode: 'Markdown' });
@@ -474,13 +474,13 @@ export class AuthMiddleware {
       return {
         success: true,
         message: [
-          '🎉 **Welcome to StableSolid!**',
+          '🎉 **Welcome to SolidState!**',
           '',
           '✅ Your referral code has been validated',
           '🚀 You now have access to the trading terminal',
           '',
           '💡 **Next steps:**',
-          '• Use /link to connect your Aster DEX API credentials',
+          '• Use /link to connect your AsterDEX API credentials',
           '• Join our beta test group for updates',
           '• Start trading with /buy or /sell commands',
           '',

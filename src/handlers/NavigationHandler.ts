@@ -12,24 +12,23 @@ export class NavigationHandler extends BaseHandler {
       ctx,
       async () => {
         const welcomeText = `
-🚀 **Welcome to AsterBot — Your Professional Trading Terminal**
+🚀 **SolidState — The First & Fastest AsterDEX Trading Bot & Terminal**
 
-Trade Aster DEX directly from Telegram with professional-grade tools. Execute trades instantly, manage positions in real-time, and control your portfolio without switching platforms.
+Execute spot and perp trades on AsterDEX instantly, right from Telegram. Zero fees, full control, and the first bot to bring AsterDEX to telegram with unmatched speed, and an easy-to-use interface.
 
-✨ **Core Features:**
-• 🔒 **Secure API Integration** — Your keys, your control
-• 💹 **Spot & Perpetual Trading** — Full market access
-• 🛡️ **Advanced TP/SL** — Professional risk management
-• 📊 **Real-Time Portfolio** — Live P&L tracking
-• 💰 **Custom Amounts** — Natural language input
-• 📈 **Market Watch** — Price alerts & analysis
-• 🎯 **Zero Trading Fees** — Maximum profit retention
+⸻
+**Core Features:**
 
-🎯 **Quick Navigation:**
-Use the **Menu Button** (≡) or type **/** for quick commands like:
-\`/trade\` • \`/portfolio\` • \`/prices\` • \`/settings\`
+• 👤 **User-Friendly UX** — Intuitive design for seamless trading directly in Telegram.
+• 🔒 **Secure API** — "Not your keys, not your coins." Your keys, your control, trading AsterDEX directly via API.
+• 💹 **Spot & Perps** — All AsterDEX markets in one place with leverage control
+• 🛡️ **Advanced TP/SL/DCA** — Complete risk-management tools
+• 📊 **Live P&L & Natural Commands** — Track portfolio and trade with simple text
+• 💰 **Zero Hidden Fees** — Keep 100% of profits; no fees on trades
 
-⚠️ **New User?** Start with \`/link\` to securely connect your API credentials
+& much more… 
+⸻
+🎁 **Beta Bonus:** Join the SolidState beta group for exclusive rewards, DM x.com/stablesolid for access and custom invites.
 
 **Choose an action below to get started:**
         `.trim();
