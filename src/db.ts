@@ -160,6 +160,32 @@ export class DatabaseManager {
         CREATE INDEX IF NOT EXISTS idx_conversation_states_user_id ON conversation_states(user_id);
       `);
 
+      // Add referral columns to users table
+      await client.query(`
+        ALTER TABLE users 
+        ADD COLUMN IF NOT EXISTS referral_code VARCHAR(30) UNIQUE,
+        ADD COLUMN IF NOT EXISTS invited_by INTEGER REFERENCES users(id),
+        ADD COLUMN IF NOT EXISTS is_group_admin BOOLEAN DEFAULT FALSE;
+        
+        CREATE INDEX IF NOT EXISTS idx_users_referral_code ON users(referral_code);
+        CREATE INDEX IF NOT EXISTS idx_users_invited_by ON users(invited_by);
+      `);
+
+      // Create referrals table
+      await client.query(`
+        CREATE TABLE IF NOT EXISTS referrals (
+          id SERIAL PRIMARY KEY,
+          referrer_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
+          referee_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
+          referral_code VARCHAR(30) NOT NULL,
+          created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+          UNIQUE(referee_id)
+        );
+        
+        CREATE INDEX IF NOT EXISTS idx_referrals_referrer_id ON referrals(referrer_id);
+        CREATE INDEX IF NOT EXISTS idx_referrals_referral_code ON referrals(referral_code);
+      `);
+
       await client.query('COMMIT');
       console.log('[DB] Database schema initialized successfully');
       
@@ -444,5 +470,269 @@ export class DatabaseManager {
     const query = 'DELETE FROM orders WHERE created_at < NOW() - INTERVAL \'$1 days\'';
     const result = await this.pool.query(query, [daysOld]);
     return result.rowCount || 0;
+  }
+
+  // ========== Referral System ==========
+
+  async generateReferralCode(userId: number, username?: string): Promise<string> {
+    // Generate SS_USERNAME_1234 format
+    const cleanName = username?.replace(/[^a-zA-Z0-9]/g, '').slice(0, 8).toUpperCase() || 'USER';
+    const randomUID = Math.random().toString(36).substr(2, 4).toUpperCase();
+    const referralCode = `SS_${cleanName}_${randomUID}`;
+
+    const query = 'UPDATE users SET referral_code = $1 WHERE id = $2';
+    await this.pool.query(query, [referralCode, userId]);
+    
+    return referralCode;
+  }
+
+  async createReferral(referrerCode: string, refereeId: number): Promise<void> {
+    const query = `
+      INSERT INTO referrals (referrer_id, referee_id, referral_code)
+      SELECT u.id, $2, $1
+      FROM users u 
+      WHERE u.referral_code = $1
+    `;
+    await this.pool.query(query, [referrerCode, refereeId]);
+
+    // Update referee with referrer info
+    const updateQuery = `
+      UPDATE users 
+      SET invited_by = (SELECT id FROM users WHERE referral_code = $1)
+      WHERE id = $2
+    `;
+    await this.pool.query(updateQuery, [referrerCode, refereeId]);
+  }
+
+  async getUserReferralStats(userId: number): Promise<{ code: string | null; referralCount: number; invitedBy: string | null }> {
+    const query = `
+      SELECT 
+        u.referral_code,
+        r.tg_id as invited_by_tg_id,
+        (SELECT COUNT(*) FROM referrals WHERE referrer_id = u.id) as referral_count
+      FROM users u
+      LEFT JOIN users r ON u.invited_by = r.id
+      WHERE u.id = $1
+    `;
+    const result = await this.pool.query(query, [userId]);
+    const row = result.rows[0];
+
+    return {
+      code: row?.referral_code || null,
+      referralCount: parseInt(row?.referral_count || '0'),
+      invitedBy: row?.invited_by_tg_id || null
+    };
+  }
+
+  async checkReferralCodeExists(code: string): Promise<boolean> {
+    const query = 'SELECT 1 FROM users WHERE referral_code = $1';
+    const result = await this.pool.query(query, [code]);
+    return result.rows.length > 0;
+  }
+
+  async updateAdminStatus(userId: number, isAdmin: boolean): Promise<void> {
+    const query = 'UPDATE users SET is_group_admin = $1 WHERE id = $2';
+    await this.pool.query(query, [isAdmin, userId]);
+  }
+
+  async updateUserAdminStatus(telegramId: number, isAdmin: boolean): Promise<void> {
+    const query = 'UPDATE users SET is_group_admin = $1 WHERE tg_id = $2';
+    await this.pool.query(query, [isAdmin, telegramId]);
+  }
+
+  async getUserReferrals(userId: number): Promise<any[]> {
+    const query = `
+      SELECT 
+        r.created_at,
+        u.tg_id as referee_tg_id
+      FROM referrals r
+      JOIN users u ON r.referee_id = u.id
+      WHERE r.referrer_id = $1
+      ORDER BY r.created_at DESC
+    `;
+    const result = await this.pool.query(query, [userId]);
+    return result.rows;
+  }
+
+  async getReferralCodeData(code: string): Promise<{ created_by: number } | null> {
+    const query = 'SELECT id as created_by FROM users WHERE referral_code = $1';
+    const result = await this.pool.query(query, [code]);
+    return result.rows[0] || null;
+  }
+
+  async updateUserReferralCode(telegramId: number, referralCode: string): Promise<void> {
+    const query = 'UPDATE users SET referral_code = $1 WHERE tg_id = $2';
+    await this.pool.query(query, [referralCode, telegramId]);
+  }
+
+  async getTeamMembers(userId: number): Promise<any[]> {
+    const query = `
+      WITH RECURSIVE team_tree AS (
+        -- Base case: direct referrals
+        SELECT 
+          u.id,
+          u.tg_id,
+          u.created_at as join_date,
+          u.referral_code,
+          u.is_group_admin,
+          1 as level,
+          ARRAY[u.id] as path
+        FROM users u 
+        WHERE u.invited_by = $1
+        
+        UNION ALL
+        
+        -- Recursive case: referrals of referrals
+        SELECT 
+          u.id,
+          u.tg_id,
+          u.created_at as join_date,
+          u.referral_code,
+          u.is_group_admin,
+          tt.level + 1,
+          tt.path || u.id
+        FROM users u
+        JOIN team_tree tt ON u.invited_by = tt.id
+        WHERE tt.level < 3 -- Limit to 3 levels deep
+        AND NOT u.id = ANY(tt.path) -- Prevent cycles
+      )
+      SELECT 
+        id,
+        tg_id,
+        join_date,
+        referral_code,
+        is_group_admin,
+        level,
+        (SELECT COUNT(*) FROM users WHERE invited_by = team_tree.id) as direct_referrals
+      FROM team_tree 
+      ORDER BY level ASC, join_date DESC
+    `;
+    const result = await this.pool.query(query, [userId]);
+    return result.rows;
+  }
+
+  async getDetailedTeamStats(userId: number): Promise<{
+    totalTeamSize: number;
+    directReferrals: number;
+    level2Referrals: number;
+    level3Referrals: number;
+    activeMembers: number;
+    admins: number;
+    recentJoins: number;
+  }> {
+    const query = `
+      WITH RECURSIVE team_tree AS (
+        -- Base case: direct referrals
+        SELECT 
+          u.id,
+          u.tg_id,
+          u.created_at,
+          u.is_group_admin,
+          1 as level
+        FROM users u 
+        WHERE u.invited_by = $1
+        
+        UNION ALL
+        
+        -- Recursive case: referrals of referrals
+        SELECT 
+          u.id,
+          u.tg_id,
+          u.created_at,
+          u.is_group_admin,
+          tt.level + 1
+        FROM users u
+        JOIN team_tree tt ON u.invited_by = tt.id
+        WHERE tt.level < 3
+      )
+      SELECT 
+        COUNT(*) as total_team_size,
+        COUNT(*) FILTER (WHERE level = 1) as direct_referrals,
+        COUNT(*) FILTER (WHERE level = 2) as level2_referrals,
+        COUNT(*) FILTER (WHERE level = 3) as level3_referrals,
+        COUNT(*) FILTER (WHERE created_at > NOW() - INTERVAL '7 days') as recent_joins,
+        COUNT(*) FILTER (WHERE is_group_admin = true) as admins,
+        COUNT(*) as active_members
+      FROM team_tree
+    `;
+    
+    const result = await this.pool.query(query, [userId]);
+    const row = result.rows[0];
+    
+    return {
+      totalTeamSize: parseInt(row.total_team_size || '0'),
+      directReferrals: parseInt(row.direct_referrals || '0'),
+      level2Referrals: parseInt(row.level2_referrals || '0'), 
+      level3Referrals: parseInt(row.level3_referrals || '0'),
+      activeMembers: parseInt(row.active_members || '0'),
+      admins: parseInt(row.admins || '0'),
+      recentJoins: parseInt(row.recent_joins || '0')
+    };
+  }
+
+  async getUserTeamRank(userId: number): Promise<{
+    rank: number;
+    totalUsers: number;
+    teamSize: number;
+  }> {
+    const query = `
+      WITH team_sizes AS (
+        WITH RECURSIVE team_tree AS (
+          SELECT 
+            referrer.id as leader_id,
+            member.id as member_id,
+            1 as level
+          FROM users referrer
+          JOIN users member ON member.invited_by = referrer.id
+          
+          UNION ALL
+          
+          SELECT 
+            tt.leader_id,
+            member.id as member_id,
+            tt.level + 1
+          FROM team_tree tt
+          JOIN users member ON member.invited_by = tt.member_id
+          WHERE tt.level < 3
+        )
+        SELECT 
+          leader_id,
+          COUNT(DISTINCT member_id) as team_size
+        FROM team_tree
+        GROUP BY leader_id
+      ),
+      user_rank AS (
+        SELECT 
+          leader_id,
+          team_size,
+          RANK() OVER (ORDER BY team_size DESC) as rank
+        FROM team_sizes
+      )
+      SELECT 
+        COALESCE(ur.rank, 999999) as rank,
+        (SELECT COUNT(DISTINCT leader_id) FROM team_sizes) as total_users,
+        COALESCE(ur.team_size, 0) as team_size
+      FROM user_rank ur
+      WHERE ur.leader_id = $1
+      
+      UNION ALL
+      
+      SELECT 
+        999999 as rank,
+        (SELECT COUNT(DISTINCT leader_id) FROM team_sizes) as total_users,
+        0 as team_size
+      WHERE NOT EXISTS (SELECT 1 FROM user_rank WHERE leader_id = $1)
+      
+      LIMIT 1
+    `;
+    
+    const result = await this.pool.query(query, [userId]);
+    const row = result.rows[0];
+    
+    return {
+      rank: parseInt(row.rank),
+      totalUsers: parseInt(row.total_users || '0'),
+      teamSize: parseInt(row.team_size || '0')
+    };
   }
 }

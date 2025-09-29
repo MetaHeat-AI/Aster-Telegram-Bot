@@ -63,10 +63,10 @@ export class AuthMiddleware {
           return; // Don't continue with normal auth flow
         }
 
-        // Check channel membership first (if configured)
+        // Check channel membership and referral access (if configured)
         if (this.REQUIRED_CHANNEL_ID && !this.DISABLE_CHANNEL_CHECK) {
           console.log(`[Auth] Channel check enabled with ID: ${this.REQUIRED_CHANNEL_ID}`);
-          const hasAccess = await this.checkChannelMembership(ctx);
+          const hasAccess = await this.checkChannelMembershipAndReferral(ctx);
           if (!hasAccess) {
             return; // Access denied message already sent
           }
@@ -220,6 +220,35 @@ export class AuthMiddleware {
   }
 
   /**
+   * Check if user is a member of the required channel and has referral access
+   */
+  private async checkChannelMembershipAndReferral(ctx: BotContext): Promise<boolean> {
+    if (!ctx.from?.id) return false;
+
+    // First check channel membership
+    const isChannelMember = await this.checkChannelMembership(ctx);
+    if (!isChannelMember) {
+      return false; // Access denied message already sent
+    }
+
+    // Check if user is an admin in the channel (admins bypass referral requirement)
+    const isAdmin = await this.checkIfGroupAdmin(ctx);
+    if (isAdmin) {
+      console.log(`[Auth] User ${ctx.from.id} is admin - bypassing referral check`);
+      return true;
+    }
+
+    // For non-admins, check if they have valid referral or are already approved
+    const hasReferralAccess = await this.checkReferralAccess(ctx.from.id);
+    if (!hasReferralAccess) {
+      await this.sendReferralRequiredMessage(ctx);
+      return false;
+    }
+
+    return true;
+  }
+
+  /**
    * Check if user is a member of the required channel
    */
   private async checkChannelMembership(ctx: BotContext): Promise<boolean> {
@@ -292,6 +321,66 @@ export class AuthMiddleware {
   }
 
   /**
+   * Check if user is an admin in the required channel
+   */
+  private async checkIfGroupAdmin(ctx: BotContext): Promise<boolean> {
+    if (!ctx.from?.id) return false;
+
+    try {
+      const member = await ctx.telegram.getChatMember(this.REQUIRED_CHANNEL_ID, ctx.from.id);
+      const isAdmin = ['creator', 'administrator'].includes(member.status);
+      
+      if (isAdmin) {
+        // Update user record to mark as admin
+        await this.db.updateUserAdminStatus(ctx.from.id, true);
+        console.log(`[Auth] User ${ctx.from.id} is admin with status: ${member.status}`);
+      }
+      
+      return isAdmin;
+    } catch (error: any) {
+      console.error('[Auth] Admin check failed:', error);
+      return false;
+    }
+  }
+
+  /**
+   * Check if user has referral access (either has referral code or is already approved)
+   */
+  private async checkReferralAccess(telegramId: number): Promise<boolean> {
+    try {
+      const user = await this.db.getUserByTelegramId(telegramId);
+      if (!user) return false;
+
+      // Check if user already has referral access
+      return user.referral_code !== null || user.is_group_admin === true;
+    } catch (error) {
+      console.error('[Auth] Referral access check failed:', error);
+      return false;
+    }
+  }
+
+  /**
+   * Send referral required message
+   */
+  private async sendReferralRequiredMessage(ctx: BotContext): Promise<void> {
+    const referralText = [
+      '🎫 **StableSolid: Invite Required**',
+      '',
+      'This is an **invite-only beta**. You need a referral code to access the trading terminal.',
+      '',
+      '💡 **How to get access:**',
+      '• Get an invite code from an existing user',
+      '• Use `/start SS_CODE_HERE` with your referral code',
+      '',
+      '🔗 **Already have a code?** Use `/start` followed by your code',
+      '',
+      '📱 *Follow @stableSolid for updates*'
+    ].join('\n');
+
+    await ctx.reply(referralText, { parse_mode: 'Markdown' });
+  }
+
+  /**
    * Send access denied message with StableSolid branding
    */
   private async sendAccessDeniedMessage(ctx: BotContext): Promise<void> {
@@ -305,6 +394,75 @@ export class AuthMiddleware {
     ].join('\n');
 
     await ctx.reply(accessDeniedText, { parse_mode: 'Markdown' });
+  }
+
+  /**
+   * Process referral code from /start command
+   */
+  async processReferralCode(telegramId: number, referralCode: string): Promise<{ success: boolean; message: string }> {
+    try {
+      // Validate referral code format
+      if (!referralCode.startsWith('SS_')) {
+        return {
+          success: false,
+          message: '❌ Invalid referral code format. Codes must start with SS_'
+        };
+      }
+
+      // Check if referral code exists and is valid
+      const referralCodeData = await this.db.getReferralCodeData(referralCode);
+      if (!referralCodeData) {
+        return {
+          success: false,
+          message: '❌ Invalid or expired referral code. Please check your code and try again.'
+        };
+      }
+
+      // Get or create user
+      let user = await this.db.getUserByTelegramId(telegramId);
+      if (!user) {
+        user = await this.db.createUser(telegramId);
+      }
+
+      // Check if user already has referral access
+      if (user.referral_code || user.is_group_admin) {
+        return {
+          success: true,
+          message: '✅ You already have access to the StableSolid trading terminal!'
+        };
+      }
+
+      // Create referral relationship
+      await this.db.createReferral(referralCode, user.id);
+
+      // Update user with referral code
+      await this.db.updateUserReferralCode(telegramId, referralCode);
+
+      console.log(`[Auth] User ${telegramId} successfully used referral code ${referralCode}`);
+
+      return {
+        success: true,
+        message: [
+          '🎉 **Welcome to StableSolid!**',
+          '',
+          '✅ Your referral code has been validated',
+          '🚀 You now have access to the trading terminal',
+          '',
+          '💡 **Next steps:**',
+          '• Use /link to connect your Aster DEX API credentials',
+          '• Join our beta test group for updates',
+          '• Start trading with /buy or /sell commands',
+          '',
+          '📈 *Happy trading!*'
+        ].join('\n')
+      };
+    } catch (error) {
+      console.error('[Auth] Referral code processing failed:', error);
+      return {
+        success: false,
+        message: '❌ Failed to process referral code. Please try again later.'
+      };
+    }
   }
 
   /**

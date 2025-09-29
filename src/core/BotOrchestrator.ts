@@ -239,10 +239,10 @@ export class BotOrchestrator {
    * Setup bot commands
    */
   private setupCommands(): void {
-    // Start command - shows welcome message
-    this.bot.command('start', (ctx) => 
-      this.navigationHandler.showWelcomeMessage(ctx)
-    );
+    // Start command - shows welcome message or processes referral code
+    this.bot.command('start', async (ctx) => {
+      await this.handleStartCommand(ctx);
+    });
 
     // Menu command - shows main menu
     this.bot.command('menu', (ctx) => 
@@ -309,6 +309,16 @@ export class BotOrchestrator {
       this.navigationHandler.showTradingMenu(ctx)
     );
 
+
+    // Invite command (admin/user only)
+    this.bot.command('invite', (ctx) => 
+      this.handleInviteCommand(ctx)
+    );
+
+    // Team command - view referral team
+    this.bot.command('team', (ctx) => 
+      this.handleTeamCommand(ctx)
+    );
 
     // Panic command (admin only)
     this.bot.command('panic', (ctx) => 
@@ -693,6 +703,30 @@ export class BotOrchestrator {
     this.bot.action(/^settings_(.+)$/, (ctx) => {
       const setting = ctx.match[1];
       this.handleSettingsSubmenu(ctx, setting);
+    });
+
+    // Referral stats handler
+    this.bot.action('referral_stats', (ctx) => 
+      this.handleReferralStatsCommand(ctx)
+    );
+
+    // Invite code handler (same as /invite command)
+    this.bot.action('invite_code', (ctx) => 
+      this.handleInviteCommand(ctx)
+    );
+
+    // Team management handlers
+    this.bot.action('team_overview', (ctx) => 
+      this.handleTeamCommand(ctx)
+    );
+
+    this.bot.action('team_members', (ctx) => 
+      this.handleTeamMembersView(ctx)
+    );
+
+    this.bot.action(/^team_level_(\d)$/, (ctx) => {
+      const level = parseInt(ctx.match[1]);
+      this.handleTeamLevelView(ctx, level);
     });
 
     console.log('[Orchestrator] Actions registered');
@@ -1157,6 +1191,10 @@ Your complete guide to professional Telegram trading with AsterBot. Learn how to
 • **/balance** — Multi-asset balance overview and analysis
 • **/settings** — Customize risk management and trading presets
 • **/menu** — Return to main dashboard anytime
+
+**🎫 Community Commands:**
+• **/invite** — Generate referral codes and view stats
+• **/team** — View your referral team and rankings
 
 **🔧 Trading Features:**
 • **Smart Execution** — Automatic slippage protection and optimal fills
@@ -5184,6 +5222,10 @@ Contact @AsterDEX\\_Support or visit docs.aster.exchange for detailed guides.
       '• `/positions` — Check open positions',
       '• `/prices` — Current market prices',
       '',
+      '🎫 **Community:**',
+      '• `/invite` — Generate referral codes',
+      '• `/team` — View your referral team',
+      '',
       '⚙️ **Settings & Help:**',
       '• `/settings` — Bot preferences & limits',
       '• `/unlink` — Remove API credentials',
@@ -5217,6 +5259,456 @@ Contact @AsterDEX\\_Support or visit docs.aster.exchange for detailed guides.
         parse_mode: 'Markdown', 
         ...keyboard 
       });
+    }
+  }
+
+  /**
+   * Handle start command with optional referral code
+   */
+  private async handleStartCommand(ctx: BotContext): Promise<void> {
+    const telegramId = ctx.from?.id;
+    if (!telegramId) {
+      await ctx.reply('❌ Unable to identify user. Please try again.');
+      return;
+    }
+
+    // Check if there's a referral code in the command
+    const text = ctx.message && 'text' in ctx.message ? ctx.message.text : '';
+    const parts = text.trim().split(' ');
+    
+    if (parts.length > 1) {
+      // There's a referral code
+      const referralCode = parts[1].trim();
+      console.log(`[Orchestrator] Processing referral code: ${referralCode} for user ${telegramId}`);
+      
+      const result = await this.authMiddleware.processReferralCode(telegramId, referralCode);
+      await ctx.reply(result.message, { parse_mode: 'Markdown' });
+      
+      if (result.success) {
+        // Show welcome message after successful referral
+        setTimeout(() => {
+          this.navigationHandler.showWelcomeMessage(ctx);
+        }, 2000);
+      }
+    } else {
+      // No referral code, show normal welcome message
+      await this.navigationHandler.showWelcomeMessage(ctx);
+    }
+  }
+
+  /**
+   * Handle invite command for generating referral codes
+   */
+  private async handleInviteCommand(ctx: BotContext): Promise<void> {
+    const telegramId = ctx.from?.id;
+    const username = ctx.from?.username;
+    
+    if (!telegramId || !ctx.userState) {
+      await ctx.reply('❌ Unable to identify user. Please try again.');
+      return;
+    }
+
+    try {
+      // Generate referral code for the user
+      const referralCode = await this.db.generateReferralCode(ctx.userState.userId, username);
+      
+      // Get user's referral stats
+      const stats = await this.db.getUserReferralStats(ctx.userState.userId);
+      
+      const inviteText = [
+        '🎫 **Your StableSolid Referral Code**',
+        '',
+        `🔗 **Your Code:** \`${referralCode}\``,
+        '',
+        '📤 **How to share:**',
+        `• Send: \`/start ${referralCode}\``,
+        `• Or share: https://t.me/${ctx.botInfo?.username}?start=${referralCode}`,
+        '',
+        '📊 **Your Stats:**',
+        `• Total invites sent: ${stats.referralCount}`,
+        `• Successful signups: ${stats.referralCount}`,
+        '',
+        '💡 **Pro tip:** Share your code with traders who want professional Aster DEX access!'
+      ].join('\n');
+
+      const keyboard = Markup.inlineKeyboard([
+        [
+          Markup.button.url(
+            '📤 Share Link', 
+            `https://t.me/${ctx.botInfo?.username}?start=${referralCode}`
+          )
+        ],
+        [
+          Markup.button.callback('📊 View Stats', 'referral_stats'),
+          Markup.button.callback('🏠 Main Menu', 'main_menu')
+        ]
+      ]);
+
+      await ctx.reply(inviteText, { 
+        parse_mode: 'Markdown', 
+        ...keyboard 
+      });
+      
+    } catch (error) {
+      console.error('[Orchestrator] Invite command failed:', error);
+      await ctx.reply('❌ Failed to generate referral code. Please try again later.');
+    }
+  }
+
+  /**
+   * Handle referral stats command
+   */
+  private async handleReferralStatsCommand(ctx: BotContext): Promise<void> {
+    if (!ctx.userState) {
+      await ctx.reply('❌ Unable to identify user. Please try again.');
+      return;
+    }
+
+    try {
+      const stats = await this.db.getUserReferralStats(ctx.userState.userId);
+      const referrals = await this.db.getUserReferrals(ctx.userState.userId);
+
+      const statsText = [
+        '📊 **Your Referral Dashboard**',
+        '',
+        '🎯 **Overview:**',
+        `• Total invites: ${stats.referralCount}`,
+        `• Successful signups: ${stats.referralCount}`,
+        `• Success rate: ${stats.referralCount > 0 ? 100 : 0}%`,
+        '',
+        '👥 **Recent Referrals:**'
+      ];
+
+      if (referrals.length > 0) {
+        referrals.slice(0, 5).forEach((referral, index) => {
+          const date = new Date(referral.created_at).toLocaleDateString();
+          statsText.push(`${index + 1}. User joined on ${date}`);
+        });
+        
+        if (referrals.length > 5) {
+          statsText.push(`... and ${referrals.length - 5} more`);
+        }
+      } else {
+        statsText.push('• No referrals yet');
+      }
+
+      statsText.push('');
+      statsText.push('💡 **Share your code to grow your network!**');
+
+      const keyboard = Markup.inlineKeyboard([
+        [
+          Markup.button.callback('🎫 Get My Code', 'invite_code'),
+          Markup.button.callback('🔄 Refresh', 'referral_stats')
+        ],
+        [
+          Markup.button.callback('🏠 Main Menu', 'main_menu')
+        ]
+      ]);
+
+      try {
+        await ctx.editMessageText(statsText.join('\n'), { 
+          parse_mode: 'Markdown', 
+          ...keyboard 
+        });
+      } catch (error) {
+        await ctx.reply(statsText.join('\n'), { 
+          parse_mode: 'Markdown', 
+          ...keyboard 
+        });
+      }
+      
+    } catch (error) {
+      console.error('[Orchestrator] Referral stats failed:', error);
+      await ctx.reply('❌ Failed to load referral stats. Please try again later.');
+    }
+  }
+
+  /**
+   * Handle team command - main team overview
+   */
+  private async handleTeamCommand(ctx: BotContext): Promise<void> {
+    if (!ctx.userState) {
+      await ctx.reply('❌ Unable to identify user. Please try again.');
+      return;
+    }
+
+    try {
+      const [stats, rank] = await Promise.all([
+        this.db.getDetailedTeamStats(ctx.userState.userId),
+        this.db.getUserTeamRank(ctx.userState.userId)
+      ]);
+
+      const teamText = [
+        '👥 **Your StableSolid Team**',
+        '',
+        '🏆 **Team Ranking**',
+        `• Rank: #${rank.rank} ${rank.rank <= 10 ? '🥇' : rank.rank <= 50 ? '🥈' : '🥉'}`,
+        `• Team Size: ${stats.totalTeamSize} members`,
+        `• Global Position: Top ${Math.round((rank.rank / rank.totalUsers) * 100)}%`,
+        '',
+        '📊 **Team Breakdown**',
+        `• Direct Referrals (L1): ${stats.directReferrals}`,
+        `• Level 2 Members: ${stats.level2Referrals}`,
+        `• Level 3 Members: ${stats.level3Referrals}`,
+        `• Team Admins: ${stats.admins}`,
+        '',
+        '📈 **Recent Activity**',
+        `• New joins (7 days): ${stats.recentJoins}`,
+        `• Active members: ${stats.activeMembers}`,
+        '',
+        '💡 **Keep growing your team to climb the leaderboard!**'
+      ];
+
+      const keyboard = Markup.inlineKeyboard([
+        [
+          Markup.button.callback('👥 View Members', 'team_members'),
+          Markup.button.callback('📊 Level 1', 'team_level_1')
+        ],
+        [
+          Markup.button.callback('📊 Level 2', 'team_level_2'),
+          Markup.button.callback('📊 Level 3', 'team_level_3')
+        ],
+        [
+          Markup.button.callback('🎫 Get Invite Code', 'invite_code'),
+          Markup.button.callback('🔄 Refresh', 'team_overview')
+        ],
+        [
+          Markup.button.callback('🏠 Main Menu', 'main_menu')
+        ]
+      ]);
+
+      try {
+        await ctx.editMessageText(teamText.join('\n'), { 
+          parse_mode: 'Markdown', 
+          ...keyboard 
+        });
+      } catch (error) {
+        await ctx.reply(teamText.join('\n'), { 
+          parse_mode: 'Markdown', 
+          ...keyboard 
+        });
+      }
+      
+    } catch (error) {
+      console.error('[Orchestrator] Team command failed:', error);
+      await ctx.reply('❌ Failed to load team data. Please try again later.');
+    }
+  }
+
+  /**
+   * Handle team members view - shows all team members
+   */
+  private async handleTeamMembersView(ctx: BotContext): Promise<void> {
+    if (!ctx.userState) {
+      await ctx.reply('❌ Unable to identify user. Please try again.');
+      return;
+    }
+
+    try {
+      const members = await this.db.getTeamMembers(ctx.userState.userId);
+      
+      if (members.length === 0) {
+        const noMembersText = [
+          '👥 **Your Team**',
+          '',
+          '📭 **No team members yet**',
+          '',
+          'Start building your team by sharing your referral code!',
+          '',
+          '💡 Each referral helps grow the StableSolid community.'
+        ].join('\n');
+
+        const keyboard = Markup.inlineKeyboard([
+          [
+            Markup.button.callback('🎫 Get Invite Code', 'invite_code')
+          ],
+          [
+            Markup.button.callback('⬅️ Back to Team', 'team_overview')
+          ]
+        ]);
+
+        try {
+          await ctx.editMessageText(noMembersText, { 
+            parse_mode: 'Markdown', 
+            ...keyboard 
+          });
+        } catch (error) {
+          await ctx.reply(noMembersText, { 
+            parse_mode: 'Markdown', 
+            ...keyboard 
+          });
+        }
+        return;
+      }
+
+      // Group members by level
+      const level1 = members.filter(m => m.level === 1);
+      const level2 = members.filter(m => m.level === 2);
+      const level3 = members.filter(m => m.level === 3);
+
+      const membersText = [
+        '👥 **Your Team Members**',
+        ``,
+        `📊 **Summary: ${members.length} total members**`,
+        `• Level 1: ${level1.length} direct referrals`,
+        `• Level 2: ${level2.length} members`,
+        `• Level 3: ${level3.length} members`,
+        ``
+      ];
+
+      // Show recent members (last 10)
+      const recentMembers = members.slice(0, 10);
+      if (recentMembers.length > 0) {
+        membersText.push('🆕 **Recent Members:**');
+        recentMembers.forEach((member, index) => {
+          const joinDate = new Date(member.join_date).toLocaleDateString();
+          const levelEmoji = member.level === 1 ? '🥇' : member.level === 2 ? '🥈' : '🥉';
+          const adminEmoji = member.is_group_admin ? ' 👑' : '';
+          const referralsInfo = member.direct_referrals > 0 ? ` (${member.direct_referrals} refs)` : '';
+          
+          membersText.push(`${levelEmoji} User${member.tg_id.toString().slice(-4)}${adminEmoji} - ${joinDate}${referralsInfo}`);
+        });
+        
+        if (members.length > 10) {
+          membersText.push(`... and ${members.length - 10} more members`);
+        }
+      }
+
+      membersText.push('');
+      membersText.push('💡 **Click level buttons below for detailed breakdowns**');
+
+      const keyboard = Markup.inlineKeyboard([
+        [
+          Markup.button.callback(`🥇 Level 1 (${level1.length})`, 'team_level_1'),
+          Markup.button.callback(`🥈 Level 2 (${level2.length})`, 'team_level_2')
+        ],
+        [
+          Markup.button.callback(`🥉 Level 3 (${level3.length})`, 'team_level_3'),
+          Markup.button.callback('🔄 Refresh', 'team_members')
+        ],
+        [
+          Markup.button.callback('⬅️ Back to Team', 'team_overview')
+        ]
+      ]);
+
+      try {
+        await ctx.editMessageText(membersText.join('\n'), { 
+          parse_mode: 'Markdown', 
+          ...keyboard 
+        });
+      } catch (error) {
+        await ctx.reply(membersText.join('\n'), { 
+          parse_mode: 'Markdown', 
+          ...keyboard 
+        });
+      }
+      
+    } catch (error) {
+      console.error('[Orchestrator] Team members view failed:', error);
+      await ctx.reply('❌ Failed to load team members. Please try again later.');
+    }
+  }
+
+  /**
+   * Handle team level view - shows specific level members
+   */
+  private async handleTeamLevelView(ctx: BotContext, level: number): Promise<void> {
+    if (!ctx.userState) {
+      await ctx.reply('❌ Unable to identify user. Please try again.');
+      return;
+    }
+
+    try {
+      const allMembers = await this.db.getTeamMembers(ctx.userState.userId);
+      const levelMembers = allMembers.filter(m => m.level === level);
+      
+      const levelEmojis: { [key: number]: string } = { 1: '🥇', 2: '🥈', 3: '🥉' };
+      const levelNames: { [key: number]: string } = { 1: 'Direct Referrals', 2: 'Second Level', 3: 'Third Level' };
+      
+      const levelText = [
+        `${levelEmojis[level]} **Level ${level}: ${levelNames[level]}**`,
+        '',
+        `👥 **${levelMembers.length} members at this level**`
+      ];
+
+      if (levelMembers.length === 0) {
+        levelText.push('');
+        levelText.push('📭 No members at this level yet.');
+        if (level === 1) {
+          levelText.push('');
+          levelText.push('💡 Share your referral code to get direct referrals!');
+        } else {
+          levelText.push('');
+          levelText.push('💡 Encourage your team members to invite others!');
+        }
+      } else {
+        levelText.push('');
+        
+        // Show detailed member list for this level
+        levelMembers.slice(0, 15).forEach((member, index) => {
+          const joinDate = new Date(member.join_date).toLocaleDateString();
+          const adminEmoji = member.is_group_admin ? ' 👑' : '';
+          const referralsInfo = member.direct_referrals > 0 ? ` (${member.direct_referrals} refs)` : '';
+          
+          levelText.push(`${index + 1}. User${member.tg_id.toString().slice(-4)}${adminEmoji}`);
+          levelText.push(`   📅 Joined: ${joinDate}${referralsInfo}`);
+        });
+        
+        if (levelMembers.length > 15) {
+          levelText.push(`... and ${levelMembers.length - 15} more members`);
+        }
+
+        // Add level-specific insights
+        const admins = levelMembers.filter(m => m.is_group_admin).length;
+        const withReferrals = levelMembers.filter(m => m.direct_referrals > 0).length;
+        const recentJoins = levelMembers.filter(m => 
+          new Date(m.join_date) > new Date(Date.now() - 7 * 24 * 60 * 60 * 1000)
+        ).length;
+
+        levelText.push('');
+        levelText.push('📊 **Level Stats:**');
+        levelText.push(`• Admins: ${admins}`);
+        levelText.push(`• Active recruiters: ${withReferrals}`);
+        levelText.push(`• Recent joins (7d): ${recentJoins}`);
+      }
+
+      const navigationButtons = [];
+      if (level > 1) {
+        navigationButtons.push(Markup.button.callback(`${levelEmojis[level-1]} Level ${level-1}`, `team_level_${level-1}`));
+      }
+      if (level < 3) {
+        navigationButtons.push(Markup.button.callback(`${levelEmojis[level+1]} Level ${level+1}`, `team_level_${level+1}`));
+      }
+
+      const keyboardRows = [];
+      if (navigationButtons.length > 0) {
+        keyboardRows.push(navigationButtons);
+      }
+      keyboardRows.push([
+        Markup.button.callback('👥 All Members', 'team_members'),
+        Markup.button.callback('🔄 Refresh', `team_level_${level}`)
+      ]);
+      keyboardRows.push([
+        Markup.button.callback('⬅️ Back to Team', 'team_overview')
+      ]);
+
+      const keyboard = Markup.inlineKeyboard(keyboardRows);
+
+      try {
+        await ctx.editMessageText(levelText.join('\n'), { 
+          parse_mode: 'Markdown', 
+          ...keyboard 
+        });
+      } catch (error) {
+        await ctx.reply(levelText.join('\n'), { 
+          parse_mode: 'Markdown', 
+          ...keyboard 
+        });
+      }
+      
+    } catch (error) {
+      console.error('[Orchestrator] Team level view failed:', error);
+      await ctx.reply('❌ Failed to load team level data. Please try again later.');
     }
   }
 }

@@ -6,6 +6,9 @@ export interface User {
   id: number;
   tg_id: number;
   created_at: Date;
+  referral_code: string | null;
+  invited_by: number | null;
+  is_group_admin: boolean;
 }
 
 export interface ApiCredentials {
