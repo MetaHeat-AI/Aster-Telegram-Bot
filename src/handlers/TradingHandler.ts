@@ -191,31 +191,28 @@ export class TradingHandler extends BaseHandler {
       symbols = await symbolService.getTopSymbolsByVolume(20, 'spot');
     }
 
-    let spotText = `🏪 **Spot Trading Interface**
+    let spotText = `🏪 **SPOT TRADING** — Balance: ${availableUsdt.toFixed(2)} USDT
 
-💰 **Available Balance:** $${availableUsdt.toFixed(2)}
+`;
 
-📊 **Market Overview (${symbols.length} pairs):**
-┌─────────────────────────────────────┐`;
-
-    // Add all symbols to preview text with better formatting
+    // Add all symbols with exact formatting as provided
     symbols.forEach((symbol, index) => {
-      const emoji = symbolService.getSymbolEmoji(symbol.symbol);
       const price = parseFloat(symbol.lastPrice);
       const change = parseFloat(symbol.priceChangePercent);
       const changeEmoji = change >= 0 ? '🟢' : '🔴';
+      const trendEmoji = change >= 0 ? '▲' : '▼';
       const changeSign = change >= 0 ? '+' : '';
       
-      // Format price based on value
+      // Format price with proper decimal places
       const formattedPrice = price >= 1 ? price.toFixed(2) : price.toFixed(6);
       
-      spotText += `\n│ ${emoji} **${symbol.symbol.replace('USDT', '')}** `;
-      spotText += `$${formattedPrice} ${changeEmoji}${changeSign}${change.toFixed(2)}%`;
+      // Format symbol pair
+      const symbolPair = symbol.symbol.replace('USDT', '/USDT');
+      
+      spotText += `${trendEmoji} ${symbolPair}     ${formattedPrice}     ${changeEmoji} ${changeSign}${change.toFixed(2)}%\n`;
     });
 
-    spotText += `\n└─────────────────────────────────────┘
-
-🎯 **Select a pair to start trading:**`;
+    spotText += `\n**Select a pair to trade:**`;
 
     const keyboardRows = [];
 
