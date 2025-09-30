@@ -4026,13 +4026,22 @@ Keys encrypted. Not your keys, not your coins.
           parse_mode: 'Markdown',
           ...Markup.inlineKeyboard(keyboard)
         });
-      } catch (parseError) {
-        // Fallback without markdown if parsing fails
-        console.warn(`[SpotTradeChoice] Markdown parse error for ${symbol}, sending without markdown:`, parseError);
-        const plainText = tradeText.join('\n').replace(/\*\*/g, '');
-        await ctx.editMessageText(plainText, {
-          ...Markup.inlineKeyboard(keyboard)
-        });
+      } catch (editError) {
+        // If edit fails (no message to edit), send new message
+        try {
+          console.warn(`[SpotTradeChoice] Edit failed for ${symbol}, sending new message:`, editError);
+          await ctx.reply(tradeText.join('\n'), {
+            parse_mode: 'Markdown',
+            ...Markup.inlineKeyboard(keyboard)
+          });
+        } catch (parseError) {
+          // Final fallback without markdown
+          console.warn(`[SpotTradeChoice] Markdown parse error for ${symbol}, sending without markdown:`, parseError);
+          const plainText = tradeText.join('\n').replace(/\*\*/g, '');
+          await ctx.reply(plainText, {
+            ...Markup.inlineKeyboard(keyboard)
+          });
+        }
       }
     } catch (error) {
       console.error(`[SpotTradeChoice] Error for ${symbol}:`, error);
