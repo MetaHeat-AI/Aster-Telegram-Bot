@@ -198,18 +198,14 @@ export class TradingHandler extends BaseHandler {
 
 **Available Spot Pairs (${symbols.length}):**`;
 
-    // Add top 5 symbols to text for preview
-    symbols.slice(0, 5).forEach(symbol => {
+    // Add all symbols to preview text
+    symbols.forEach(symbol => {
       const emoji = symbolService.getSymbolEmoji(symbol.symbol);
       const price = parseFloat(symbol.lastPrice).toFixed(4);
       const change = parseFloat(symbol.priceChangePercent).toFixed(2);
       const changeEmoji = parseFloat(symbol.priceChangePercent) >= 0 ? '🟢' : '🔴';
       spotText += `\n• ${emoji} ${symbol.symbol} - $${price} ${changeEmoji}${change}%`;
     });
-
-    if (symbols.length > 5) {
-      spotText += `\n• +${symbols.length - 5} more pairs available below...`;
-    }
 
     spotText += `\n\n**Select a pair to trade:**`;
 
