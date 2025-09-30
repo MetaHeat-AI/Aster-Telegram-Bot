@@ -25,9 +25,9 @@ export class SymbolService {
    * Check if a symbol is a test/development symbol that should be excluded
    */
   private isTestSymbol(symbol: string): boolean {
+    // Only filter out obvious test symbols, keep potential real trading pairs
     const testKeywords = [
-      'TEST', 'DEMO', 'FAKE', 'MOCK', 'SAMPLE', 
-      'CDL', 'FORM', 'USD1', 'USD2', 'USD3'
+      'TEST', 'DEMO', 'FAKE', 'MOCK', 'SAMPLE'
     ];
     
     const upperSymbol = symbol.toUpperCase();
