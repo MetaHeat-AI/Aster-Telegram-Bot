@@ -119,11 +119,11 @@ export class TradingHandler extends BaseHandler {
           await this.showCustomSpotInterface(ctx, customSymbol, availableUsdt);
         } else {
           // Run account and symbol data in parallel - PERFORMANCE BOOST
-          const [availableUsdt, topSpotSymbols] = await Promise.all([
+          const [availableUsdt, allSpotSymbols] = await Promise.all([
             spotAccountService.getUsdtBalance(),
-            symbolService.getTopSymbolsByVolume(4, 'spot')
+            symbolService.getTopSymbolsByVolume(20, 'spot') // Get all available spot symbols
           ]);
-          await this.showSpotTradingInterface(ctx, availableUsdt, topSpotSymbols);
+          await this.showSpotTradingInterface(ctx, availableUsdt, allSpotSymbols);
         }
 
         await this.emitNavigation(ctx, 'trading_menu', 'spot_trading', { customSymbol });
@@ -181,14 +181,14 @@ export class TradingHandler extends BaseHandler {
   }
 
 
-  private async showSpotTradingInterface(ctx: BotContext, availableUsdt: number, topSpotSymbols?: any[]): Promise<void> {
+  private async showSpotTradingInterface(ctx: BotContext, availableUsdt: number, allSpotSymbols?: any[]): Promise<void> {
     // Get symbol service for emoji/name formatting
     const symbolService = await this.getSymbolService(ctx.userState?.userId || 0);
     
     // Use pre-fetched symbols if provided, otherwise fetch them (fallback for backward compatibility)
-    let symbols = topSpotSymbols;
+    let symbols = allSpotSymbols;
     if (!symbols) {
-      symbols = await symbolService.getTopSymbolsByVolume(4, 'spot');
+      symbols = await symbolService.getTopSymbolsByVolume(20, 'spot');
     }
 
     let spotText = `
@@ -196,36 +196,31 @@ export class TradingHandler extends BaseHandler {
 
 💰 **Available USDT:** $${availableUsdt.toFixed(2)}
 
-**Top Spot Pairs:**`;
+**Available Spot Pairs (${symbols.length}):**`;
 
-    // Add top symbols to text
-    symbols.slice(0, 3).forEach(symbol => {
+    // Add top 5 symbols to text for preview
+    symbols.slice(0, 5).forEach(symbol => {
       const emoji = symbolService.getSymbolEmoji(symbol.symbol);
-      const name = symbolService.getCleanSymbolName(symbol.symbol);
       const price = parseFloat(symbol.lastPrice).toFixed(4);
       const change = parseFloat(symbol.priceChangePercent).toFixed(2);
       const changeEmoji = parseFloat(symbol.priceChangePercent) >= 0 ? '🟢' : '🔴';
       spotText += `\n• ${emoji} ${symbol.symbol} - $${price} ${changeEmoji}${change}%`;
     });
 
-    spotText += `\n\n**Quick Actions:**`;
+    if (symbols.length > 5) {
+      spotText += `\n• +${symbols.length - 5} more pairs available below...`;
+    }
+
+    spotText += `\n\n**Select a pair to trade:**`;
 
     const keyboardRows = [];
 
-    // Create buttons from top symbols (2x2 grid)
-    const buttonSymbols = symbols.slice(0, 4);
-    for (let i = 0; i < buttonSymbols.length; i += 2) {
+    // Create buttons for ALL spot symbols (3 per row for better layout)
+    for (let i = 0; i < symbols.length; i += 3) {
       const row = [];
       
-      if (buttonSymbols[i]) {
-        const symbol = buttonSymbols[i];
-        const emoji = symbolService.getSymbolEmoji(symbol.symbol);
-        const name = symbolService.getCleanSymbolName(symbol.symbol);
-        row.push(Markup.button.callback(`${emoji} ${name}`, `spot_buy_${symbol.symbol}`));
-      }
-      
-      if (buttonSymbols[i + 1]) {
-        const symbol = buttonSymbols[i + 1];
+      for (let j = 0; j < 3 && i + j < symbols.length; j++) {
+        const symbol = symbols[i + j];
         const emoji = symbolService.getSymbolEmoji(symbol.symbol);
         const name = symbolService.getCleanSymbolName(symbol.symbol);
         row.push(Markup.button.callback(`${emoji} ${name}`, `spot_buy_${symbol.symbol}`));
@@ -235,9 +230,6 @@ export class TradingHandler extends BaseHandler {
     }
 
     // Add action buttons
-    keyboardRows.push([
-      Markup.button.callback('🎯 Custom Pair', 'spot_custom_pair')
-    ]);
     keyboardRows.push([
       Markup.button.callback('💱 Sell Assets', 'spot_sell_menu')
     ]);
