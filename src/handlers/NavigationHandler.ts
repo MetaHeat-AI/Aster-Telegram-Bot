@@ -26,7 +26,7 @@ Trade spot and perpetuals on **AsterDEX** instantly, right from Telegram. **Zero
 **Zero Hidden Fees** Keep 100% of your profits
 …& much more
 
-🎁 **Beta Bonus:** Join the StableSolid beta group for exclusive rewards, DM [StableSolid](https://x.com/stablesolid) for access and custom invites.
+🎁 **Beta Bonus:** Join the StableSolid beta group for exclusive rewards, DM StableSolid for access and custom invites.
 
 **Choose an action below to get started:**
         `.trim();
@@ -54,6 +54,7 @@ Trade spot and perpetuals on **AsterDEX** instantly, right from Telegram. **Zero
         
         await ctx.reply(welcomeText, { 
           parse_mode: 'Markdown',
+          disable_web_page_preview: true,
           ...keyboard 
         });
 
