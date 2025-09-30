@@ -191,11 +191,11 @@ export class TradingHandler extends BaseHandler {
       symbols = await symbolService.getTopSymbolsByVolume(20, 'spot');
     }
 
-    let spotText = `🏪 **SPOT TRADING** — Balance: ${availableUsdt.toFixed(2)} USDT
+    let spotText = `🏪 **SPOT TRADING**
 
 `;
 
-    // Add all symbols with exact formatting as provided
+    // Add all symbols with exact formatting and inline buttons
     symbols.forEach((symbol, index) => {
       const price = parseFloat(symbol.lastPrice);
       const change = parseFloat(symbol.priceChangePercent);
@@ -209,22 +209,54 @@ export class TradingHandler extends BaseHandler {
       // Format symbol pair
       const symbolPair = symbol.symbol.replace('USDT', '/USDT');
       
-      spotText += `${trendEmoji} ${symbolPair}     ${formattedPrice}     ${changeEmoji} ${changeSign}${change.toFixed(2)}%\n`;
+      spotText += `${trendEmoji} [${symbolPair}](https://t.me/${ctx.botInfo?.username}?start=spot_${symbol.symbol})     ${formattedPrice}     ${changeEmoji} ${changeSign}${change.toFixed(2)}%\n`;
     });
 
-    spotText += `\n**Select a pair to trade:**`;
+    // Get spot balances and add to display
+    try {
+      if (ctx.userState?.isLinked) {
+        const spotAccountService = await this.getSpotAccountService(ctx.userState.userId);
+        const balances = await spotAccountService.getSpotBalances();
+        
+        // Filter balances with meaningful amounts
+        const meaningfulBalances = balances.filter(b => b.total >= 0.0001 || b.asset === 'USDT');
+        const totalValue = meaningfulBalances.reduce((sum, b) => sum + (b.usdValue || 0), 0);
+        
+        spotText += `\n📌 **Select a pair to trade**
+
+🏪 **SPOT ASSETS** — Total: $${totalValue.toFixed(2)}
+
+`;
+
+        // Format balances like the example
+        const balanceTexts = meaningfulBalances.map(balance => {
+          if (balance.asset === 'USDT') {
+            const percentage = totalValue > 0 ? (balance.total / totalValue * 100) : 0;
+            return `USDT: $${balance.total.toFixed(2)} (${percentage.toFixed(1)}%)`;
+          } else {
+            return `${balance.asset}: ${balance.total.toFixed(4)} ($${(balance.usdValue || 0).toFixed(2)})`;
+          }
+        });
+        
+        spotText += balanceTexts.join(' • ');
+      } else {
+        spotText += `\n📌 **Select a pair to trade**`;
+      }
+    } catch (error) {
+      console.warn('[TradingHandler] Could not load spot balances:', error);
+      spotText += `\n📌 **Select a pair to trade**`;
+    }
 
     const keyboardRows = [];
 
-    // Create buttons for ALL spot symbols (3 per row for better layout)
-    for (let i = 0; i < symbols.length; i += 3) {
+    // Create inline keyboard for each symbol (2 per row)
+    for (let i = 0; i < symbols.length; i += 2) {
       const row = [];
       
-      for (let j = 0; j < 3 && i + j < symbols.length; j++) {
+      for (let j = 0; j < 2 && i + j < symbols.length; j++) {
         const symbol = symbols[i + j];
-        const emoji = symbolService.getSymbolEmoji(symbol.symbol);
-        const name = symbolService.getCleanSymbolName(symbol.symbol);
-        row.push(Markup.button.callback(`${emoji} ${name}`, `spot_buy_${symbol.symbol}`));
+        const symbolPair = symbol.symbol.replace('USDT', '/USDT');
+        row.push(Markup.button.callback(`📈 ${symbolPair}`, `spot_trade_${symbol.symbol}`));
       }
       
       keyboardRows.push(row);
@@ -232,10 +264,7 @@ export class TradingHandler extends BaseHandler {
 
     // Add action buttons
     keyboardRows.push([
-      Markup.button.callback('💱 Sell Assets', 'spot_sell_menu')
-    ]);
-    keyboardRows.push([
-      Markup.button.callback('🏦 My Assets', 'spot_assets'),
+      Markup.button.callback('💱 Sell Assets', 'spot_sell_menu'),
       Markup.button.callback('💰 Balance', 'balance')
     ]);
 

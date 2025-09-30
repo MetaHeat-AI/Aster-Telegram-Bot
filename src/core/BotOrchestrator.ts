@@ -543,6 +543,12 @@ export class BotOrchestrator {
       this.handleSpotConfirmSell(ctx, symbol, parseFloat(quantity));
     });
 
+    // Spot trading symbol click handler (from clickable text in spot interface)
+    this.bot.action(/^spot_trade_([A-Z0-9]+USDT)$/, (ctx) => {
+      const symbol = ctx.match[1];
+      this.handleSpotTradeChoice(ctx, symbol);
+    });
+
     // Quick trading handlers
     this.bot.action(/^quick_trade_(.+)$/, (ctx) => {
       const symbol = ctx.match[1];
@@ -3887,6 +3893,47 @@ Keys encrypted. Not your keys, not your coins.
     } catch (error) {
       console.error('Perps amount selection error:', error);
       await ctx.reply(`❌ Failed to load amount selection for ${symbol}. Please try again.`);
+    }
+  }
+
+  /**
+   * Handle spot trade choice (buy/sell selection from clickable symbols)
+   */
+  private async handleSpotTradeChoice(ctx: BotContext, symbol: string): Promise<void> {
+    if (!ctx.userState?.isLinked) {
+      await ctx.reply('❌ Please link your API credentials first using /link');
+      return;
+    }
+
+    try {
+      // Get current price for display
+      const currentPrice = await this.getSpotPrice(symbol);
+      const cleanSymbol = symbol.replace('USDT', '');
+      
+      const tradeText = [
+        `🏪 **${cleanSymbol}/USDT Spot Trading**`,
+        `💵 **Current Price:** $${currentPrice.toFixed(6)}`,
+        '',
+        '🎯 **Choose Trading Direction:**'
+      ].join('\n');
+
+      const keyboard = Markup.inlineKeyboard([
+        [
+          Markup.button.callback('🟢 BUY', `spot_buy_${symbol}`),
+          Markup.button.callback('🔴 SELL', `spot_sell_${symbol}`)
+        ],
+        [
+          Markup.button.callback('🔙 Back to Spot Trading', 'trade_spot')
+        ]
+      ]);
+
+      await ctx.editMessageText(tradeText, {
+        parse_mode: 'Markdown',
+        ...keyboard
+      });
+    } catch (error) {
+      console.error(`[SpotTradeChoice] Error for ${symbol}:`, error);
+      await ctx.reply(`❌ Unable to load ${symbol} trading options. Please try again.`);
     }
   }
 
