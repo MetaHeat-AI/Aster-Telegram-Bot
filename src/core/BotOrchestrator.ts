@@ -1198,7 +1198,7 @@ export class BotOrchestrator {
       } catch (tradeError: any) {
         console.error('[Orchestrator] Perps trade execution failed:', tradeError);
         
-        // Show error message
+        // Update the processing message with error details
         await ctx.telegram.editMessageText(
           ctx.chat?.id,
           processingMsg.message_id,
@@ -1208,8 +1208,7 @@ export class BotOrchestrator {
           `**Amount:** $${amount}\n` +
           `**Leverage:** ${leverage}x\n` +
           `**Error:** ${tradeError.message || 'Unknown error'}\n\n` +
-          `🔄 Please try again or contact support.\n\n` +
-          `🔙 Use /menu to return to main menu.`,
+          `🔄 Please try again or contact support.`,
           { parse_mode: 'Markdown' }
         );
       }
@@ -2194,28 +2193,20 @@ Keys encrypted. Not your keys, not your coins.
         ]
       ]);
       
-      await ctx.editMessageText(successText, { 
-        parse_mode: 'Markdown', 
-        ...keyboard 
-      });
+      await ctx.telegram.editMessageText(
+        ctx.chat?.id,
+        messageId,
+        undefined,
+        successText,
+        { 
+          parse_mode: 'Markdown', 
+          ...keyboard 
+        }
+      );
       
     } catch (error) {
       console.error('Error showing execution success with position management:', error);
-      // Fallback to simple success message
-      const actionEmoji = action.toLowerCase().includes('buy') || action.toLowerCase().includes('long') ? '🟢' : '🔴';
-      const typeLabel = type === 'perps' ? 'Futures' : 'Spot';
-      
-      const fallbackText = [
-        `✅ **${typeLabel} ${action} Order Executed!**`,
-        '',
-        `${actionEmoji} **Symbol:** ${symbol}`,
-        `💰 **Amount:** $${(positionSizeUSDT || amount).toFixed(2)}`,
-        leverage ? `⚡ **Leverage:** ${leverage}x` : '',
-        '',
-        'Use /menu to continue trading'
-      ].filter(line => line !== '').join('\n');
-      
-      await ctx.editMessageText(fallbackText, { parse_mode: 'Markdown' });
+      throw error;
     }
   }
 
