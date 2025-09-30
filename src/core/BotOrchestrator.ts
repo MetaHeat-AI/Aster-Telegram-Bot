@@ -3899,57 +3899,56 @@ Keys encrypted. Not your keys, not your coins.
       return;
     }
 
-    try {
-      const apiClient = await this.apiClientService.getOrCreateClient(ctx.userState.userId);
-      const SpotAccountService = await import('../services/SpotAccountService');
-      const spotService = new SpotAccountService.SpotAccountService(apiClient);
-      
-      let availableBalance = 0;
-      if (side === 'BUY') {
-        const usdtBalance = await spotService.getUsdtBalance();
-        availableBalance = usdtBalance;
-      } else {
-        const asset = symbol.replace('USDT', '');
-        const assetBalance = await spotService.getAssetBalance(asset);
-        if (assetBalance) {
-          availableBalance = assetBalance.usdValue || 0;
-        }
+    const apiClient = await this.apiClientService.getOrCreateClient(ctx.userState.userId);
+    const SpotAccountService = await import('../services/SpotAccountService');
+    const spotService = new SpotAccountService.SpotAccountService(apiClient);
+    
+    let availableBalance = 0;
+    if (side === 'BUY') {
+      const usdtBalance = await spotService.getUsdtBalance();
+      availableBalance = usdtBalance;
+    } else {
+      const asset = symbol.replace('USDT', '');
+      const assetBalance = await spotService.getAssetBalance(asset);
+      if (assetBalance) {
+        availableBalance = assetBalance.usdValue || 0;
       }
-      
-      const currentPrice = await this.getSpotPrice(symbol);
-      const sideText = side === 'BUY' ? 'Buy' : 'Sell';
-      const emoji = side === 'BUY' ? '🟢' : '🔴';
-      const balanceText = side === 'BUY' ? 'USDT Balance' : `${symbol.replace('USDT', '')} Value`;
-      
-      const spotText = [
-        `${emoji} **${sideText} ${symbol.replace('USDT', '')}**`,
-        `💵 **Current Price:** $${currentPrice.toFixed(6)}`,
-        `💰 **Available ${balanceText}:** $${availableBalance.toFixed(2)}`,
-        '',
-        '🎯 **Select Position Size:**',
-        '',
-        '📊 **Quick Percentage Options:**'
-      ].join('\n');
+    }
+    
+    const currentPrice = await this.getSpotPrice(symbol);
+    const sideText = side === 'BUY' ? 'Buy' : 'Sell';
+    const emoji = side === 'BUY' ? '🟢' : '🔴';
+    const balanceText = side === 'BUY' ? 'USDT Balance' : `${symbol.replace('USDT', '')} Value`;
+    
+    const spotText = [
+      `${emoji} **${sideText} ${symbol.replace('USDT', '')}**`,
+      `💵 **Current Price:** $${currentPrice.toFixed(6)}`,
+      `💰 **Available ${balanceText}:** $${availableBalance.toFixed(2)}`,
+      '',
+      '🎯 **Select Position Size:**',
+      '',
+      '📊 **Quick Percentage Options:**'
+    ].join('\n');
 
-      const keyboard = Markup.inlineKeyboard([
-        [
-          Markup.button.callback(`25% ($${(availableBalance * 0.25).toFixed(2)})`, `spot_amount_${side.toLowerCase()}_${symbol}_25pct`),
-          Markup.button.callback(`50% ($${(availableBalance * 0.50).toFixed(2)})`, `spot_amount_${side.toLowerCase()}_${symbol}_50pct`)
-        ],
-        [
-          Markup.button.callback(`75% ($${(availableBalance * 0.75).toFixed(2)})`, `spot_amount_${side.toLowerCase()}_${symbol}_75pct`),
-          Markup.button.callback(`100% ($${availableBalance.toFixed(2)})`, `spot_amount_${side.toLowerCase()}_${symbol}_100pct`)
-        ],
-        [
-          Markup.button.callback('💰 Enter USDT Amount', `spot_manual_usdt_${side.toLowerCase()}_${symbol}`),
-          Markup.button.callback('🪙 Enter Token Amount', `spot_manual_token_${side.toLowerCase()}_${symbol}`)
-        ],
-        [
-          Markup.button.callback('🔙 Back', 'trade_spot')
-        ]
-      ]);
+    const keyboard = Markup.inlineKeyboard([
+      [
+        Markup.button.callback(`25% ($${(availableBalance * 0.25).toFixed(2)})`, `spot_amount_${side.toLowerCase()}_${symbol}_25pct`),
+        Markup.button.callback(`50% ($${(availableBalance * 0.50).toFixed(2)})`, `spot_amount_${side.toLowerCase()}_${symbol}_50pct`)
+      ],
+      [
+        Markup.button.callback(`75% ($${(availableBalance * 0.75).toFixed(2)})`, `spot_amount_${side.toLowerCase()}_${symbol}_75pct`),
+        Markup.button.callback(`100% ($${availableBalance.toFixed(2)})`, `spot_amount_${side.toLowerCase()}_${symbol}_100pct`)
+      ],
+      [
+        Markup.button.callback('💰 Enter USDT Amount', `spot_manual_usdt_${side.toLowerCase()}_${symbol}`),
+        Markup.button.callback('🪙 Enter Token Amount', `spot_manual_token_${side.toLowerCase()}_${symbol}`)
+      ],
+      [
+        Markup.button.callback('🔙 Back', 'trade_spot')
+      ]
+    ]);
 
-      await ctx.editMessageText(spotText, { parse_mode: 'Markdown', ...keyboard });
+    await ctx.editMessageText(spotText, { parse_mode: 'Markdown', ...keyboard });
   }
 
   /**
