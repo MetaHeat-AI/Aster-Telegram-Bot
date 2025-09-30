@@ -47,13 +47,13 @@ Trade spot and perpetuals on **AsterDEX** instantly, right from Telegram. **Zero
         try {
           await ctx.editMessageText(welcomeText, { 
             parse_mode: 'Markdown',
-            disable_web_page_preview: true,
+            link_preview_options: { is_disabled: true },
             ...keyboard 
           });
         } catch (error) {
           await ctx.reply(welcomeText, { 
             parse_mode: 'Markdown',
-            disable_web_page_preview: true,
+            link_preview_options: { is_disabled: true },
             ...keyboard 
           });
         }

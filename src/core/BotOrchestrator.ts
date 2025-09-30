@@ -759,7 +759,8 @@ export class BotOrchestrator {
       }
       
       // Check if expecting custom pair input
-      if ((ctx.userState as any)?.expectingCustomPair) {
+      if (ctx.userState?.conversationState?.step === 'waiting_custom_pair' && 
+          ctx.userState?.conversationState?.data?.action === 'pair_input') {
         this.handleCustomPairText(ctx, ctx.message.text);
         return;
       }
@@ -4616,7 +4617,20 @@ Keys encrypted. Not your keys, not your coins.
 
     // Set conversation state to expect custom pair input
     if (ctx.userState) {
-      (ctx.userState as any).expectingCustomPair = mode;
+      const conversationState = {
+        step: 'waiting_custom_pair' as const,
+        data: { 
+          mode: mode,
+          action: 'pair_input' as const 
+        }
+      };
+      
+      ctx.userState.conversationState = conversationState;
+      
+      // Store in middleware for persistence across requests
+      await this.authMiddleware.setConversationState(ctx.userState.telegramId, conversationState);
+      
+      console.log(`[CustomPair] Set conversation state for user ${ctx.userState.telegramId}: waiting_custom_pair for ${mode}`);
     }
   }
 
@@ -4624,11 +4638,14 @@ Keys encrypted. Not your keys, not your coins.
    * Handle custom pair text input
    */
   private async handleCustomPairText(ctx: BotContext, text: string): Promise<void> {
-    const mode = (ctx.userState as any)?.expectingCustomPair;
+    const mode = ctx.userState?.conversationState?.data?.mode;
     if (!mode) return;
 
     // Clear conversation state
-    delete (ctx.userState as any).expectingCustomPair;
+    if (ctx.userState) {
+      ctx.userState.conversationState = undefined;
+      await this.authMiddleware.clearConversationState(ctx.userState.telegramId);
+    }
 
     const symbol = text.toUpperCase().trim();
     
