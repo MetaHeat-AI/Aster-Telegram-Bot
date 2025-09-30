@@ -82,8 +82,10 @@ export class AuthMiddleware {
           console.log(`[Auth] Checking access for non-start command with channel ID: ${this.REQUIRED_CHANNEL_ID}`);
           const hasAccess = await this.checkChannelMembershipAndReferral(ctx);
           if (!hasAccess) {
-            return; // Access denied message already sent
+            console.log(`[Auth] Access denied for user ${ctx.from?.id}, stopping middleware chain`);
+            return; // Access denied message already sent, stop middleware chain
           }
+          console.log(`[Auth] Access granted for user ${ctx.from?.id}, continuing to handler`);
         } else {
           console.log(`[Auth] Channel check disabled - REQUIRED_CHANNEL_ID: ${this.REQUIRED_CHANNEL_ID}, DISABLED: ${this.DISABLE_CHANNEL_CHECK}`);
         }
@@ -328,15 +330,18 @@ export class AuthMiddleware {
         errorCode: error.code
       });
       
-      // If API fails, show informative message
-      await ctx.reply(
-        '⚠️ **Access Verification Failed**\n\n' +
-        `Debug Info: Channel ${this.REQUIRED_CHANNEL_ID}, User ${ctx.from.id}\n` +
-        `Error: ${error.message}\n\n` +
-        'Unable to verify your channel membership. Please try again in a moment.\n\n' +
-        'If the problem persists, make sure you\'re a member of our StableSolid beta test group.',
-        { parse_mode: 'Markdown' }
-      );
+      // If API fails, we cannot verify membership - deny access
+      console.log(`[Auth] API error preventing access verification for user ${ctx.from.id}`);
+      
+      // Check if user has referral access as fallback
+      const hasReferralAccess = await this.checkReferralAccess(ctx.from.id);
+      if (hasReferralAccess) {
+        console.log(`[Auth] User ${ctx.from.id} has referral access despite API error - access granted`);
+        return true;
+      }
+      
+      // No access available, ask for referral code
+      await this.sendReferralRequiredMessage(ctx);
       return false;
     }
   }
