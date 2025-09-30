@@ -807,6 +807,28 @@ export class BotOrchestrator {
         this.handleCustomTPSLPriceText(ctx, ctx.message.text);
         return;
       }
+      
+      // Check if user typed a symbol name for trading
+      const symbolText = ctx.message.text.toUpperCase().trim();
+      if (ctx.userState?.isLinked && /^[A-Z0-9]{2,10}$/.test(symbolText)) {
+        const possibleSymbol = `${symbolText}USDT`;
+        console.log(`[Text] Checking if ${possibleSymbol} is a valid trading symbol`);
+        
+        try {
+          // Check if this is a valid symbol
+          const apiClient = await this.apiClientService.getOrCreateClient(ctx.userState.userId);
+          const tickers = await apiClient.getAllSpotTickers();
+          const symbolExists = tickers.some(t => t.symbol === possibleSymbol);
+          
+          if (symbolExists) {
+            console.log(`[Text] ${possibleSymbol} is valid, showing trading interface`);
+            await this.handleSpotTradeChoice(ctx, possibleSymbol);
+            return;
+          }
+        } catch (error) {
+          console.warn(`[Text] Error checking symbol ${possibleSymbol}:`, error);
+        }
+      }
 
       // Check if expecting API key input
       if (ctx.userState?.conversationState?.step === 'waiting_api_key') {
