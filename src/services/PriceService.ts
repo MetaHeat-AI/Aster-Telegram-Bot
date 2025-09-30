@@ -87,28 +87,27 @@ export class PriceService {
 
 
   /**
-   * Fetch price from external API
+   * Fetch price from AsterDEX API
    */
   private async fetchPriceFromApi(symbol: string): Promise<number> {
-    // Mock implementation - replace with actual API call
-    // In production, this would call your price API
-    const mockPrices: Record<string, number> = {
-      'BTCUSDT': 45000 + Math.random() * 1000,
-      'ETHUSDT': 2500 + Math.random() * 100,
-      'SOLUSDT': 100 + Math.random() * 10,
-      'BNBUSDT': 300 + Math.random() * 20,
-      'ASTERUSDT': 1 + Math.random() * 0.1
-    };
-
-    // Simulate API delay
-    await new Promise(resolve => setTimeout(resolve, 100 + Math.random() * 200));
-
-    const price = mockPrices[symbol];
-    if (!price) {
-      throw new Error(`Price not found for symbol: ${symbol}`);
+    try {
+      // Use the public AsterDEX API to get real market prices
+      const AsterApiClient = await import('../aster');
+      const publicClient = new AsterApiClient.AsterApiClient('https://api.aster.exchange', '', '');
+      
+      // Get 24hr ticker data which includes current price
+      const ticker = await publicClient.get24hrTicker(symbol);
+      const price = parseFloat(ticker.lastPrice);
+      
+      if (!price || price <= 0) {
+        throw new Error(`Invalid price data for symbol: ${symbol}`);
+      }
+      
+      return price;
+    } catch (error) {
+      console.error(`[PriceService] Failed to fetch price for ${symbol}:`, error);
+      throw new Error(`Failed to fetch price for ${symbol}: ${error instanceof Error ? error.message : 'Unknown error'}`);
     }
-
-    return price;
   }
 
 
