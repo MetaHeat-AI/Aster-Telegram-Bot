@@ -12,25 +12,23 @@ export class NavigationHandler extends BaseHandler {
       ctx,
       async () => {
         const welcomeText = `
-🚀 **SolidState — The First & Fastest AsterDEX Trading Bot & Terminal**
+StableSolid — The First & Fastest AsterDEX Trading Bot & Terminal
 
-Execute spot and perp trades on AsterDEX instantly, right from Telegram. Zero fees, full control, and the first bot to bring AsterDEX to telegram with unmatched speed, and an easy-to-use interface.
+Trade spot and perpetuals on AsterDEX instantly, right from Telegram. Zero fees, full control, and a smooth, user-friendly interface make trading effortless, fast, and secure.
 
-⸻
-**Core Features:**
+Core Features
 
-• 👤 **User-Friendly UX** — Intuitive design for seamless trading directly in Telegram.
-• 🔒 **Secure API** — "Not your keys, not your coins." Your keys, your control, trading AsterDEX directly via API.
-• 💹 **Spot & Perps** — All AsterDEX markets in one place with leverage control
-• 🛡️ **Advanced TP/SL/DCA** — Complete risk-management tools
-• 📊 **Live P&L & Natural Commands** — Track portfolio and trade with simple text
-• 💰 **Zero Hidden Fees** — Keep 100% of profits; no fees on trades
+Fast & Intuitive UX Telegram-native interface for seamless on-the-go trades
+Secure & Private Your account and keys are fully under your control
+Spot & Perps All AsterDEX markets with leverage
+Advanced Risk Tools TP/SL/DCA for professional risk management
+Live P&L & Natural Commands Track and trade in real time
+Zero Hidden Fees Keep 100% of your profits
+…& much more
 
-& much more… 
-⸻
-🎁 **Beta Bonus:** Join the SolidState beta group for exclusive rewards, DM x.com/stablesolid for access and custom invites.
+🎁 Beta Bonus: Join the StableSolid beta group for exclusive rewards, DM StableSolid for access and custom invites.
 
-**Choose an action below to get started:**
+Choose an action below to get started:
         `.trim();
 
         const keyboard = Markup.inlineKeyboard([
@@ -55,7 +53,6 @@ Execute spot and perp trades on AsterDEX instantly, right from Telegram. Zero fe
         await this.emitNavigation(ctx, 'unknown', 'welcome');
         
         await ctx.reply(welcomeText, { 
-          parse_mode: 'Markdown', 
           ...keyboard 
         });
 

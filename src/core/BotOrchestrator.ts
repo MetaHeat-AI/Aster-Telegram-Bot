@@ -737,6 +737,12 @@ export class BotOrchestrator {
    */
   private setupTextHandlers(): void {
     this.bot.on('text', async (ctx) => {
+      // Only handle text in private chats to protect privacy
+      if (ctx.chat?.type !== 'private') {
+        console.log(`[Text] Ignoring text from ${ctx.chat?.type} chat for privacy`);
+        return;
+      }
+
       // Handle conversation states and natural language commands
       console.log(`[Text] Received: ${ctx.message.text} from user ${ctx.userState?.userId}`);
       console.log(`[Text] Conversation state: ${ctx.userState?.conversationState?.step || 'none'}`);
@@ -1225,6 +1231,17 @@ Contact @AsterDEX\\_Support or visit docs.aster.exchange for detailed guides.
    * Handle link API command
    */
   private async handleLinkCommand(ctx: BotContext): Promise<void> {
+    // Ensure this is only used in private chats for security
+    if (ctx.chat?.type !== 'private') {
+      await ctx.reply(
+        '🔒 **Privacy Protection**\n\n' +
+        'API linking is only available in private chats for your security.\n\n' +
+        '💬 **Please message me directly** to link your API credentials.',
+        { parse_mode: 'Markdown' }
+      );
+      return;
+    }
+
     // Check if already linked
     if (ctx.userState?.isLinked) {
       await ctx.reply(
@@ -1469,6 +1486,17 @@ Contact @AsterDEX\\_Support or visit docs.aster.exchange for detailed guides.
    * Handle unlink command
    */
   private async handleUnlinkCommand(ctx: BotContext): Promise<void> {
+    // Ensure this is only used in private chats for security
+    if (ctx.chat?.type !== 'private') {
+      await ctx.reply(
+        '🔒 **Privacy Protection**\n\n' +
+        'Account management is only available in private chats for your security.\n\n' +
+        '💬 **Please message me directly** to manage your API credentials.',
+        { parse_mode: 'Markdown' }
+      );
+      return;
+    }
+
     if (!ctx.userState?.isLinked) {
       await ctx.reply('❌ No API credentials are currently linked.');
       return;
@@ -1596,6 +1624,17 @@ Contact @AsterDEX\\_Support or visit docs.aster.exchange for detailed guides.
    * Handle buy command
    */
   private async handleBuyCommand(ctx: BotContext): Promise<void> {
+    // Ensure this is only used in private chats for security
+    if (ctx.chat?.type !== 'private') {
+      await ctx.reply(
+        '🔒 **Privacy Protection**\n\n' +
+        'Trading commands are only available in private chats for your security.\n\n' +
+        '💬 **Please message me directly** to access trading features.',
+        { parse_mode: 'Markdown' }
+      );
+      return;
+    }
+
     await ctx.reply('📈 **Quick Buy**\n\nUse /trade or the main menu to access the trading interface.');
   }
 
@@ -1603,6 +1642,17 @@ Contact @AsterDEX\\_Support or visit docs.aster.exchange for detailed guides.
    * Handle sell command
    */
   private async handleSellCommand(ctx: BotContext): Promise<void> {
+    // Ensure this is only used in private chats for security
+    if (ctx.chat?.type !== 'private') {
+      await ctx.reply(
+        '🔒 **Privacy Protection**\n\n' +
+        'Trading commands are only available in private chats for your security.\n\n' +
+        '💬 **Please message me directly** to access trading features.',
+        { parse_mode: 'Markdown' }
+      );
+      return;
+    }
+
     await ctx.reply('📉 **Quick Sell**\n\nUse /trade or the main menu to access the trading interface.');
   }
 
@@ -1610,6 +1660,17 @@ Contact @AsterDEX\\_Support or visit docs.aster.exchange for detailed guides.
    * Handle positions command - FULL ORIGINAL IMPLEMENTATION
    */
   private async handlePositionsCommand(ctx: BotContext): Promise<void> {
+    // Ensure this is only used in private chats for privacy
+    if (ctx.chat?.type !== 'private') {
+      await ctx.reply(
+        '🔒 **Privacy Protection**\n\n' +
+        'Position data is only available in private chats for your security.\n\n' +
+        '💬 **Please message me directly** to view your positions.',
+        { parse_mode: 'Markdown' }
+      );
+      return;
+    }
+
     if (!ctx.userState?.isLinked) {
       await ctx.reply('❌ Please link your API credentials first using /link');
       return;
@@ -1696,6 +1757,17 @@ Contact @AsterDEX\\_Support or visit docs.aster.exchange for detailed guides.
    * Handle balance command
    */
   private async handleBalanceCommand(ctx: BotContext): Promise<void> {
+    // Ensure this is only used in private chats for privacy
+    if (ctx.chat?.type !== 'private') {
+      await ctx.reply(
+        '🔒 **Privacy Protection**\n\n' +
+        'Balance information is only available in private chats for your security.\n\n' +
+        '💬 **Please message me directly** to view your balance.',
+        { parse_mode: 'Markdown' }
+      );
+      return;
+    }
+
     if (!ctx.userState?.isLinked) {
       await ctx.reply('❌ Please link your API credentials first using /link');
       return;
@@ -1824,6 +1896,17 @@ Contact @AsterDEX\\_Support or visit docs.aster.exchange for detailed guides.
    * Handle P&L command
    */
   private async handlePnLCommand(ctx: BotContext): Promise<void> {
+    // Ensure this is only used in private chats for privacy
+    if (ctx.chat?.type !== 'private') {
+      await ctx.reply(
+        '🔒 **Privacy Protection**\n\n' +
+        'P&L information is only available in private chats for your security.\n\n' +
+        '💬 **Please message me directly** to view your P&L.',
+        { parse_mode: 'Markdown' }
+      );
+      return;
+    }
+
     await this.handlePositionsCommand(ctx); // Reuse positions display for now
   }
 
