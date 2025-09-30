@@ -549,6 +549,11 @@ export class BotOrchestrator {
       this.handleSpotTradeChoice(ctx, symbol);
     });
 
+    // Spot assets header (just acknowledge, no action needed)
+    this.bot.action('spot_assets_header', (ctx) => {
+      // Do nothing, this is just a visual separator
+    });
+
     // Quick trading handlers
     this.bot.action(/^quick_trade_(.+)$/, (ctx) => {
       const symbol = ctx.match[1];
@@ -3897,7 +3902,7 @@ Keys encrypted. Not your keys, not your coins.
   }
 
   /**
-   * Handle spot trade choice (buy/sell selection from clickable symbols)
+   * Handle spot trade choice (show holdings and direct buy/sell with quantity options)
    */
   private async handleSpotTradeChoice(ctx: BotContext, symbol: string): Promise<void> {
     if (!ctx.userState?.isLinked) {
@@ -3906,31 +3911,107 @@ Keys encrypted. Not your keys, not your coins.
     }
 
     try {
-      // Get current price for display
+      const apiClient = await this.apiClientService.getOrCreateClient(ctx.userState.userId);
+      const SpotAccountService = await import('../services/SpotAccountService');
+      const spotService = new SpotAccountService.SpotAccountService(apiClient);
+      
+      // Get current price and holdings
       const currentPrice = await this.getSpotPrice(symbol);
       const cleanSymbol = symbol.replace('USDT', '');
       
-      const tradeText = [
-        `🏪 **${cleanSymbol}/USDT Spot Trading**`,
-        `💵 **Current Price:** $${currentPrice.toFixed(6)}`,
-        '',
-        '🎯 **Choose Trading Direction:**'
-      ].join('\n');
+      // Get USDT balance for buying
+      const usdtBalance = await spotService.getUsdtBalance();
+      
+      // Get asset balance for selling
+      const assetBalance = await spotService.getAssetBalance(cleanSymbol);
+      const assetAmount = assetBalance?.total || 0;
+      const assetUsdValue = assetBalance?.usdValue || 0;
+      
+      // Build the display text
+      let tradeText = [
+        `🏪 **${cleanSymbol}/USDT**`,
+        `💵 **Price:** $${currentPrice.toFixed(6)}`,
+        ''
+      ];
 
-      const keyboard = Markup.inlineKeyboard([
-        [
-          Markup.button.callback('🟢 BUY', `spot_buy_${symbol}`),
+      // Show holdings
+      if (assetAmount > 0) {
+        tradeText.push(`💰 **Your ${cleanSymbol}:** ${assetAmount.toFixed(4)} ($${assetUsdValue.toFixed(2)})`);
+      } else {
+        tradeText.push(`💰 **Your ${cleanSymbol}:** 0`);
+      }
+      
+      tradeText.push(`💵 **Your USDT:** $${usdtBalance.toFixed(2)}`);
+      tradeText.push('');
+      tradeText.push('🎯 **Trading Options:**');
+
+      // Create keyboard with buy/sell options and quantities
+      const keyboard = [];
+      
+      // BUY section (if has USDT)
+      if (usdtBalance >= 1) {
+        keyboard.push([
+          Markup.button.callback('🟢 BUY', `spot_buy_${symbol}`)
+        ]);
+        
+        // Quick buy amounts
+        const buyAmounts = [10, 25, 50, 100].filter(amount => amount <= usdtBalance);
+        if (buyAmounts.length > 0) {
+          const buyRow1 = buyAmounts.slice(0, 2).map(amount => 
+            Markup.button.callback(`Buy $${amount}`, `spot_execute_buy_${symbol}_${amount}u`)
+          );
+          const buyRow2 = buyAmounts.slice(2, 4).map(amount => 
+            Markup.button.callback(`Buy $${amount}`, `spot_execute_buy_${symbol}_${amount}u`)
+          );
+          
+          if (buyRow1.length > 0) keyboard.push(buyRow1);
+          if (buyRow2.length > 0) keyboard.push(buyRow2);
+        }
+        
+        keyboard.push([
+          Markup.button.callback('💰 Custom USDT Amount', `spot_custom_amount_buy_${symbol}`)
+        ]);
+      }
+
+      // SELL section (if has asset)
+      if (assetAmount >= 0.0001) {
+        keyboard.push([
           Markup.button.callback('🔴 SELL', `spot_sell_${symbol}`)
-        ],
-        [
-          Markup.button.callback('🔙 Back to Spot Trading', 'trade_spot')
-        ]
+        ]);
+        
+        // Quick sell percentages
+        keyboard.push([
+          Markup.button.callback('Sell 25%', `spot_sell_25_${cleanSymbol}`),
+          Markup.button.callback('Sell 50%', `spot_sell_50_${cleanSymbol}`)
+        ]);
+        keyboard.push([
+          Markup.button.callback('Sell 75%', `spot_sell_75_${cleanSymbol}`),
+          Markup.button.callback('Sell 100%', `spot_sell_100_${cleanSymbol}`)
+        ]);
+        
+        keyboard.push([
+          Markup.button.callback('🪙 Custom Token Amount', `spot_custom_amount_sell_${symbol}`)
+        ]);
+      }
+
+      // Back button
+      keyboard.push([
+        Markup.button.callback('🔙 Back to Spot Trading', 'trade_spot')
       ]);
 
-      await ctx.editMessageText(tradeText, {
-        parse_mode: 'Markdown',
-        ...keyboard
-      });
+      try {
+        await ctx.editMessageText(tradeText.join('\n'), {
+          parse_mode: 'Markdown',
+          ...Markup.inlineKeyboard(keyboard)
+        });
+      } catch (parseError) {
+        // Fallback without markdown if parsing fails
+        console.warn(`[SpotTradeChoice] Markdown parse error for ${symbol}, sending without markdown:`, parseError);
+        const plainText = tradeText.join('\n').replace(/\*\*/g, '');
+        await ctx.editMessageText(plainText, {
+          ...Markup.inlineKeyboard(keyboard)
+        });
+      }
     } catch (error) {
       console.error(`[SpotTradeChoice] Error for ${symbol}:`, error);
       await ctx.reply(`❌ Unable to load ${symbol} trading options. Please try again.`);
@@ -5486,8 +5567,25 @@ Keys encrypted. Not your keys, not your coins.
     const parts = text.trim().split(' ');
     
     if (parts.length > 1) {
-      // There's a referral code
       const referralCode = parts[1].trim();
+      
+      // Check if this is a spot trading deep link
+      if (referralCode.startsWith('spot_') && referralCode.endsWith('USDT')) {
+        const symbol = referralCode.replace('spot_', '');
+        console.log(`[Orchestrator] Processing spot trading deep link for ${symbol} from user ${telegramId}`);
+        
+        // Check if user is linked before showing trading interface
+        if (!ctx.userState?.isLinked) {
+          await ctx.reply('❌ Please link your API credentials first using /link');
+          return;
+        }
+        
+        // Redirect to spot trade choice
+        await this.handleSpotTradeChoice(ctx, symbol);
+        return;
+      }
+      
+      // Otherwise process as referral code
       console.log(`[Orchestrator] Processing referral code: ${referralCode} for user ${telegramId}`);
       
       const result = await this.authMiddleware.processReferralCode(telegramId, referralCode);

@@ -209,7 +209,7 @@ export class TradingHandler extends BaseHandler {
       // Format symbol pair
       const symbolPair = symbol.symbol.replace('USDT', '/USDT');
       
-      spotText += `${trendEmoji} [${symbolPair}](https://t.me/${ctx.botInfo?.username}?start=spot_${symbol.symbol})     ${formattedPrice}     ${changeEmoji} ${changeSign}${change.toFixed(2)}%\n`;
+      spotText += `${trendEmoji} ${symbolPair}     ${formattedPrice}     ${changeEmoji} ${changeSign}${change.toFixed(2)}%\n`;
     });
 
     // Get spot balances and add to display
@@ -249,7 +249,7 @@ export class TradingHandler extends BaseHandler {
 
     const keyboardRows = [];
 
-    // Create inline keyboard for each symbol (2 per row)
+    // Add symbol buttons (2 per row for better layout)
     for (let i = 0; i < symbols.length; i += 2) {
       const row = [];
       
@@ -260,6 +260,44 @@ export class TradingHandler extends BaseHandler {
       }
       
       keyboardRows.push(row);
+    }
+
+    // Add asset buttons for holdings (if user is linked and has assets)
+    try {
+      if (ctx.userState?.isLinked) {
+        const spotAccountService = await this.getSpotAccountService(ctx.userState.userId);
+        const balances = await spotAccountService.getSpotBalances();
+        
+        // Get assets with meaningful amounts (excluding USDT as it's already covered)
+        const meaningfulAssets = balances.filter(b => 
+          b.total >= 0.0001 && 
+          b.asset !== 'USDT' && 
+          (b.usdValue || 0) >= 1 // Only show assets worth at least $1
+        );
+        
+        if (meaningfulAssets.length > 0) {
+          // Add separator
+          keyboardRows.push([
+            Markup.button.callback('━━━ YOUR ASSETS ━━━', 'spot_assets_header')
+          ]);
+          
+          // Add asset buttons (2 per row)
+          for (let i = 0; i < meaningfulAssets.length; i += 2) {
+            const row = [];
+            
+            for (let j = 0; j < 2 && i + j < meaningfulAssets.length; j++) {
+              const asset = meaningfulAssets[i + j];
+              const symbol = `${asset.asset}USDT`;
+              const displayText = `💰 ${asset.asset} ($${(asset.usdValue || 0).toFixed(2)})`;
+              row.push(Markup.button.callback(displayText, `spot_trade_${symbol}`));
+            }
+            
+            keyboardRows.push(row);
+          }
+        }
+      }
+    } catch (error) {
+      console.warn('[TradingHandler] Could not add asset buttons:', error);
     }
 
     // Add action buttons
@@ -279,7 +317,14 @@ export class TradingHandler extends BaseHandler {
     try {
       await ctx.editMessageText(spotText, { parse_mode: 'Markdown', ...keyboard });
     } catch (error) {
-      await ctx.reply(spotText, { parse_mode: 'Markdown', ...keyboard });
+      try {
+        await ctx.reply(spotText, { parse_mode: 'Markdown', ...keyboard });
+      } catch (parseError) {
+        // Fallback without markdown if parsing fails
+        console.warn('[TradingHandler] Markdown parse error, sending without markdown:', parseError);
+        const plainText = spotText.replace(/\*\*/g, '');
+        await ctx.reply(plainText, { ...keyboard });
+      }
     }
   }
 
