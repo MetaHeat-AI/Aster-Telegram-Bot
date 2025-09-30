@@ -619,7 +619,14 @@ export class BotOrchestrator {
       const action = ctx.match[1];
       const symbol = ctx.match[2];
       const percentage = parseInt(ctx.match[3]);
-      this.handleSpotTPSLSelection(ctx, symbol, action.toUpperCase() as 'BUY' | 'SELL', percentage, 'percentage');
+      
+      if (action.toUpperCase() === 'SELL') {
+        // For selling, execute directly without TP/SL
+        this.handleSpotDirectSell(ctx, symbol, percentage, 'percentage');
+      } else {
+        // For buying, show TP/SL options
+        this.handleSpotTPSLSelection(ctx, symbol, action.toUpperCase() as 'BUY' | 'SELL', percentage, 'percentage');
+      }
     });
 
     // Manual amount input handlers
@@ -4293,7 +4300,13 @@ Keys encrypted. Not your keys, not your coins.
 
     try {
       if (mode === 'spot') {
-        await this.handleSpotTPSLSelection(ctx, symbol, side, amount, 'usdt');
+        if (side === 'SELL') {
+          // For spot selling, execute directly without TP/SL
+          await this.handleSpotDirectSell(ctx, symbol, amount, 'usdt');
+        } else {
+          // For spot buying, show TP/SL options
+          await this.handleSpotTPSLSelection(ctx, symbol, side, amount, 'usdt');
+        }
       } else {
         await this.handlePerpsTPSLSelection(ctx, symbol, side, leverage!, marginMode!, amount, 'usdt');
       }
@@ -4340,7 +4353,13 @@ Keys encrypted. Not your keys, not your coins.
       }
 
       if (mode === 'spot') {
-        await this.handleSpotTPSLSelection(ctx, symbol, side, tokenAmount, 'token');
+        if (side === 'SELL') {
+          // For spot selling, execute directly without TP/SL
+          await this.handleSpotDirectSell(ctx, symbol, tokenAmount, 'token');
+        } else {
+          // For spot buying, show TP/SL options
+          await this.handleSpotTPSLSelection(ctx, symbol, side, tokenAmount, 'token');
+        }
       } else {
         await this.handlePerpsTPSLSelection(ctx, symbol, side, leverage!, marginMode!, tokenAmount, 'token');
       }
@@ -5106,6 +5125,42 @@ Keys encrypted. Not your keys, not your coins.
     } catch (error) {
       console.error('Spot TP/SL selection error:', error);
       await ctx.reply('❌ Failed to load TP/SL options. Please try again.');
+    }
+  }
+
+  /**
+   * Handle direct spot sell without TP/SL options
+   */
+  private async handleSpotDirectSell(ctx: BotContext, symbol: string, amount: number, amountType: string): Promise<void> {
+    try {
+      const apiClient = await this.apiClientService.getOrCreateClient(ctx.userState!.userId);
+      const SpotAccountService = await import('../services/SpotAccountService');
+      const spotService = new SpotAccountService.SpotAccountService(apiClient);
+      
+      const asset = symbol.replace('USDT', '');
+      let finalAmount = amount;
+      
+      if (amountType === 'percentage') {
+        // Convert percentage to actual token amount
+        const assetBalance = await spotService.getAssetBalance(asset);
+        if (!assetBalance || assetBalance.total === 0) {
+          await ctx.reply(`❌ No ${asset} balance available to sell.`);
+          return;
+        }
+        finalAmount = (assetBalance.total * amount) / 100;
+      } else if (amountType === 'usdt') {
+        // Convert USDT amount to token amount using current price
+        const currentPrice = await this.getSpotPrice(symbol);
+        finalAmount = amount / currentPrice;
+      }
+      // For 'token' type, finalAmount is already the token amount
+      
+      // Execute the sell order
+      await this.handleSpotExecuteAction(ctx, symbol, 'SELL', Math.floor(finalAmount * 1000)); // Convert to integer for API
+      
+    } catch (error) {
+      console.error('Spot direct sell error:', error);
+      await ctx.reply('❌ Failed to execute sell order. Please try again.');
     }
   }
 
