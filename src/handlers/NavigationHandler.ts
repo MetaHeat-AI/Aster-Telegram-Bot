@@ -12,25 +12,21 @@ export class NavigationHandler extends BaseHandler {
       ctx,
       async () => {
         const welcomeText = `
-**StableSolid — The First & Fastest AsterDEX Trading Bot & Terminal**
+**StableSolid** — The First & Fastest **AsterDEX** Trading Bot & Terminal
 
-Trade spot and perpetuals on AsterDEX instantly, right from Telegram. Zero fees, full control, and a smooth, user-friendly interface make trading effortless, fast, and secure.
-
-⸻
+Trade spot and perpetuals on **AsterDEX** instantly, right from Telegram. **Zero fees, full control, and a smooth, user-friendly interface** make trading effortless, fast, and secure.
 
 **Core Features**
-    •    **Fast & Intuitive UX** – Telegram-native interface for seamless on-the-go trades
-    •    **Secure & Private** – Your account and keys are fully under your control
-    •    **Spot & Perps** – All AsterDEX markets with leverage
-    •    **Advanced Risk Tools** – TP / SL / DCA for professional risk management
-    •    **Live P&L & Natural Commands** – Track and trade in real time
-    •    **Zero Hidden Fees** – Keep 100% of your profits
-    •    **…& much more**
 
-⸻
+**Fast & Intuitive UX** Telegram-native interface for seamless on-the-go trades
+**Secure & Private** Your account and keys are fully under your control
+**Spot & Perps** All AsterDEX markets with leverage
+**Advanced Risk Tools** TP/SL/DCA for professional risk management
+**Live P&L & Natural Commands** Track and trade in real time
+**Zero Hidden Fees** Keep 100% of your profits
+…& much more
 
-🎁 **Beta Bonus:** Join the StableSolid beta group for exclusive rewards.
-DM [StableSolid](https://x.com/stablesolid) for access and custom invites.
+🎁 **Beta Bonus:** Join the StableSolid beta group for exclusive rewards, DM [StableSolid](https://x.com/stablesolid) for access and custom invites.
 
 **Choose an action below to get started:**
         `.trim();
