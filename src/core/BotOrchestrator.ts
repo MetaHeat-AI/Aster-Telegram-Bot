@@ -4010,12 +4010,12 @@ Keys encrypted. Not your keys, not your coins.
         
         // Quick sell percentages
         keyboard.push([
-          Markup.button.callback('Sell 25%', `spot_sell_25_${cleanSymbol}`),
-          Markup.button.callback('Sell 50%', `spot_sell_50_${cleanSymbol}`)
+          Markup.button.callback('Sell 25%', `spot_sell_${cleanSymbol}_25pct`),
+          Markup.button.callback('Sell 50%', `spot_sell_${cleanSymbol}_50pct`)
         ]);
         keyboard.push([
-          Markup.button.callback('Sell 75%', `spot_sell_75_${cleanSymbol}`),
-          Markup.button.callback('Sell 100%', `spot_sell_100_${cleanSymbol}`)
+          Markup.button.callback('Sell 75%', `spot_sell_${cleanSymbol}_75pct`),
+          Markup.button.callback('Sell 100%', `spot_sell_${cleanSymbol}_100pct`)
         ]);
         
         keyboard.push([
@@ -5155,8 +5155,56 @@ Keys encrypted. Not your keys, not your coins.
       }
       // For 'token' type, finalAmount is already the token amount
       
-      // Execute the sell order
-      await this.handleSpotExecuteAction(ctx, symbol, 'SELL', Math.floor(finalAmount * 1000)); // Convert to integer for API
+      // Execute the sell order directly with correct parameters
+      const processingMsg = await ctx.reply(
+        `🔴 **Processing Spot Sell Order**\n\n` +
+        `**Symbol:** ${symbol}\n` +
+        `**Amount:** ${finalAmount.toFixed(6)} ${asset}\n` +
+        `**Type:** Market Sell\n\n` +
+        `⏳ Executing trade...`,
+        { parse_mode: 'Markdown' }
+      );
+
+      try {
+        const orderResult = await apiClient.createSpotOrder({
+          symbol,
+          side: 'SELL',
+          type: 'MARKET',
+          quantity: finalAmount.toString() // Use quantity for selling (token amount)
+        });
+
+        // Enhanced success message
+        const executedPrice = parseFloat(orderResult.avgPrice || orderResult.fills?.[0]?.price || '0');
+        const usdtValue = finalAmount * executedPrice;
+        
+        await ctx.telegram.editMessageText(
+          ctx.chat?.id,
+          processingMsg.message_id,
+          undefined,
+          `✅ **Spot Sell Order Executed**\n\n` +
+          `**Symbol:** ${symbol}\n` +
+          `**Amount Sold:** ${finalAmount.toFixed(6)} ${asset}\n` +
+          `**Average Price:** $${executedPrice.toFixed(6)}\n` +
+          `**Total Received:** $${usdtValue.toFixed(2)} USDT\n` +
+          `**Order ID:** ${orderResult.orderId}\n\n` +
+          `🎉 Trade completed successfully!`,
+          { parse_mode: 'Markdown' }
+        );
+
+      } catch (tradeError: any) {
+        console.error('[SpotDirectSell] Spot sell execution failed:', tradeError);
+        
+        await ctx.telegram.editMessageText(
+          ctx.chat?.id,
+          processingMsg.message_id,
+          undefined,
+          `❌ **Spot Sell Order Failed**\n\n` +
+          `**Symbol:** ${symbol}\n` +
+          `**Error:** ${tradeError.message || 'Unknown error'}\n\n` +
+          `🔄 Please try again or contact support.`,
+          { parse_mode: 'Markdown' }
+        );
+      }
       
     } catch (error) {
       console.error('Spot direct sell error:', error);
