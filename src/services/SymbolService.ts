@@ -68,6 +68,10 @@ export class SymbolService {
 
       console.log(`[SymbolService] Got ${spotTickers.length} spot tickers and ${spotExchangeInfo?.symbols?.length || 0} exchange symbols`);
 
+      // Log all ticker symbols
+      const tickerSymbols = spotTickers.map(t => t.symbol);
+      console.log(`[SymbolService] Ticker symbols:`, tickerSymbols);
+
       // Get available spot symbols
       const spotSymbols = new Set(
         (spotExchangeInfo?.symbols || [])
@@ -76,6 +80,7 @@ export class SymbolService {
       );
 
       console.log(`[SymbolService] Found ${spotSymbols.size} available spot symbols`);
+      console.log(`[SymbolService] All spot symbols:`, Array.from(spotSymbols));
       console.log(`[SymbolService] Sample spot symbols:`, Array.from(spotSymbols).slice(0, 5));
 
       // Filter to only USDT pairs that are available on spot, excluding test symbols
