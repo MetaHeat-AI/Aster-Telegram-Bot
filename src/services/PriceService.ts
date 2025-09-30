@@ -87,26 +87,58 @@ export class PriceService {
 
 
   /**
-   * Fetch price from AsterDEX API
+   * Fetch price from AsterDEX API with proper connection handling
+   * Uses spot API (sapi) for spot symbols and futures API (fapi) for perps
    */
   private async fetchPriceFromApi(symbol: string): Promise<number> {
     try {
-      // Use the public AsterDEX API to get real market prices
       const AsterApiClient = await import('../aster');
-      const publicClient = new AsterApiClient.AsterApiClient('https://api.aster.exchange', '', '');
       
-      // Get 24hr ticker data which includes current price
-      const ticker = await publicClient.get24hrTicker(symbol);
+      // Try spot API first (sapi.asterdex.com) since most trading pairs are available on spot
+      try {
+        console.log(`[PriceService] Trying spot API for ${symbol}`);
+        const spotClient = new AsterApiClient.AsterApiClient('https://sapi.asterdex.com', '', '');
+        const spotTickers = await spotClient.getAllSpotTickers();
+        const spotTicker = spotTickers.find((t: any) => t.symbol === symbol);
+        
+        if (spotTicker && spotTicker.lastPrice) {
+          const price = parseFloat(spotTicker.lastPrice);
+          if (price > 0) {
+            console.log(`[PriceService] Successfully fetched spot price for ${symbol}: $${price}`);
+            return price;
+          }
+        }
+      } catch (spotError) {
+        console.log(`[PriceService] Spot API failed for ${symbol}, trying futures API`);
+      }
+      
+      // If spot fails, try futures API (fapi.asterdex.com)
+      console.log(`[PriceService] Trying futures API for ${symbol}`);
+      const futuresClient = new AsterApiClient.AsterApiClient('https://fapi.asterdex.com', '', '');
+      const ticker = await futuresClient.get24hrTicker(symbol);
       const price = parseFloat(ticker.lastPrice);
       
       if (!price || price <= 0) {
-        throw new Error(`Invalid price data for symbol: ${symbol}`);
+        throw new Error(`Invalid price data received for ${symbol}: ${ticker.lastPrice}`);
       }
       
+      console.log(`[PriceService] Successfully fetched futures price for ${symbol}: $${price}`);
       return price;
     } catch (error) {
-      console.error(`[PriceService] Failed to fetch price for ${symbol}:`, error);
-      throw new Error(`Failed to fetch price for ${symbol}: ${error instanceof Error ? error.message : 'Unknown error'}`);
+      console.error(`[PriceService] Both spot and futures API calls failed for ${symbol}:`, error);
+      
+      // Re-throw the error with clear messaging for the UI
+      if (error instanceof Error) {
+        if (error.message.includes('Network error') || error.message.includes('timeout')) {
+          throw new Error(`Connection to AsterDEX API failed. Please check your internet connection and try again.`);
+        }
+        if (error.message.includes('Invalid price data')) {
+          throw new Error(`Invalid price data received from AsterDEX API for ${symbol}.`);
+        }
+        throw new Error(`AsterDEX API error for ${symbol}: ${error.message}`);
+      }
+      
+      throw new Error(`Failed to fetch price for ${symbol}: Unknown error`);
     }
   }
 

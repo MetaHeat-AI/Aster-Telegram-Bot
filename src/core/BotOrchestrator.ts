@@ -430,6 +430,12 @@ export class BotOrchestrator {
       this.handleCustomAmount(ctx, 'spot', side.toUpperCase() as 'BUY' | 'SELL', symbol);
     });
 
+    // Custom TP/SL handlers
+    this.bot.action(/^spot_custom_tpsl_(buy|sell)_([A-Z0-9]+USDT)_(\d+|\d+\.\d+)_(percentage|usdt|token)$/, (ctx) => {
+      const [, side, symbol, amount, amountType] = ctx.match;
+      this.handleCustomTPSLInput(ctx, 'spot', side.toUpperCase() as 'BUY' | 'SELL', symbol, parseFloat(amount), amountType);
+    });
+
     this.bot.action(/^perps_custom_amount_(buy|sell)_(.+)$/, (ctx) => {
       const [, side, symbol] = ctx.match;
       this.handleCustomAmount(ctx, 'perps', side.toUpperCase() as 'BUY' | 'SELL', symbol);
@@ -785,7 +791,8 @@ export class BotOrchestrator {
 
       // Check if expecting custom TP/SL price input
       if (ctx.userState?.conversationState?.step === 'waiting_custom_pair' && 
-          ctx.userState?.conversationState?.data?.action) {
+          ctx.userState?.conversationState?.data?.action && 
+          ctx.userState?.conversationState?.data?.action !== 'pair_input') {
         this.handleCustomTPSLPriceText(ctx, ctx.message.text);
         return;
       }
@@ -3401,7 +3408,7 @@ Keys encrypted. Not your keys, not your coins.
     try {
       // Use public API client for market data
       const AsterApiClient = await import('../aster');
-      const apiClient = new AsterApiClient.AsterApiClient('https://api.aster.exchange', '', '');
+      const apiClient = new AsterApiClient.AsterApiClient('https://fapi.asterdex.com', '', '');
       const [currentPrice, ticker] = await Promise.all([
         this.priceService.getCurrentPrice(symbol),
         apiClient.get24hrTicker(symbol)
@@ -3462,7 +3469,7 @@ Keys encrypted. Not your keys, not your coins.
             this.priceService.getCurrentPrice(symbol),
             (async () => {
               const AsterApiClient = await import('../aster');
-              const publicClient = new AsterApiClient.AsterApiClient('https://api.aster.exchange', '', '');
+              const publicClient = new AsterApiClient.AsterApiClient('https://fapi.asterdex.com', '', '');
               return publicClient.get24hrTicker(symbol);
             })()
           ]);
@@ -3526,7 +3533,7 @@ Keys encrypted. Not your keys, not your coins.
     try {
       // Use public API client for market data
       const AsterApiClient = await import('../aster');
-      const apiClient = new AsterApiClient.AsterApiClient('https://api.aster.exchange', '', '');
+      const apiClient = new AsterApiClient.AsterApiClient('https://fapi.asterdex.com', '', '');
       const allTickers = await apiClient.getAllFuturesTickers();
       
       // Filter USDT pairs and sort by volume
@@ -3577,10 +3584,11 @@ Keys encrypted. Not your keys, not your coins.
       return;
     }
 
-    try {
-      const modeText = mode === 'spot' ? 'Spot' : 'Perps';
-      const sideText = side === 'BUY' ? 'Buy' : 'Sell';
-      const currentPrice = await this.priceService.getCurrentPrice(symbol);
+    const modeText = mode === 'spot' ? 'Spot' : 'Perps';
+    const sideText = side === 'BUY' ? 'Buy' : 'Sell';
+    const currentPrice = mode === 'spot' 
+      ? await this.getSpotPrice(symbol)
+      : await this.priceService.getCurrentPrice(symbol);
       
       const customText = [
         `💰 **Custom ${modeText} ${sideText}**`,
@@ -3624,10 +3632,6 @@ Keys encrypted. Not your keys, not your coins.
         await this.authMiddleware.setConversationState(ctx.userState.telegramId, conversationState);
       }
 
-    } catch (error) {
-      console.error('Custom amount error:', error);
-      await ctx.reply(`❌ Failed to load custom amount for ${symbol}. Please try again.`);
-    }
   }
 
   /**
@@ -3912,7 +3916,7 @@ Keys encrypted. Not your keys, not your coins.
         }
       }
       
-      const currentPrice = await this.priceService.getCurrentPrice(symbol);
+      const currentPrice = await this.getSpotPrice(symbol);
       const sideText = side === 'BUY' ? 'Buy' : 'Sell';
       const emoji = side === 'BUY' ? '🟢' : '🔴';
       const balanceText = side === 'BUY' ? 'USDT Balance' : `${symbol.replace('USDT', '')} Value`;
@@ -3946,10 +3950,6 @@ Keys encrypted. Not your keys, not your coins.
       ]);
 
       await ctx.editMessageText(spotText, { parse_mode: 'Markdown', ...keyboard });
-    } catch (error) {
-      console.error('Spot trading selection error:', error);
-      await ctx.reply(`❌ Failed to load trading selection for ${symbol}. Please try again.`);
-    }
   }
 
   /**
@@ -4712,6 +4712,78 @@ Keys encrypted. Not your keys, not your coins.
       `🔄 Use /trade to return to trading menu.`,
       { parse_mode: 'Markdown' }
     );
+  }
+
+  /**
+   * Get spot price directly from spot API (for spot-only symbols like USDCUSDT)
+   */
+  private async getSpotPrice(symbol: string): Promise<number> {
+    try {
+      const AsterApiClient = await import('../aster');
+      const spotClient = new AsterApiClient.AsterApiClient('https://sapi.asterdex.com', '', '');
+      const tickers = await spotClient.getAllSpotTickers();
+      const ticker = tickers.find(t => t.symbol === symbol);
+      
+      if (ticker && ticker.lastPrice) {
+        const price = parseFloat(ticker.lastPrice);
+        if (price > 0) {
+          console.log(`[SpotPrice] Successfully fetched spot price for ${symbol}: $${price}`);
+          return price;
+        }
+      }
+      
+      throw new Error(`No valid spot price found for ${symbol}`);
+    } catch (error) {
+      console.error(`[SpotPrice] Failed to get spot price for ${symbol}:`, error);
+      throw error;
+    }
+  }
+
+  /**
+   * Handle custom TP/SL input
+   */
+  private async handleCustomTPSLInput(ctx: BotContext, mode: 'spot' | 'perps', side: 'BUY' | 'SELL', symbol: string, amount: number, amountType: string): Promise<void> {
+    const modeEmoji = mode === 'spot' ? '🏪' : '⚡';
+    const sideEmoji = side === 'BUY' ? '📈' : '📉';
+    const modeText = mode === 'spot' ? 'Spot' : 'Perps';
+    
+    await ctx.editMessageText(
+      `🎯 **Custom TP/SL for ${modeText} Trade**\n\n` +
+      `${sideEmoji} **${side.toLowerCase()}** ${symbol}\n` +
+      `💰 **Amount:** ${amount} ${amountType === 'percentage' ? '%' : amountType === 'usdt' ? 'USDT' : 'tokens'}\n\n` +
+      `📊 Please enter your custom take profit percentage:\n\n` +
+      `📝 **Examples:**\n` +
+      `• 5 (for 5% profit)\n` +
+      `• 10 (for 10% profit)\n` +
+      `• 25 (for 25% profit)\n\n` +
+      `⏳ Waiting for your input...`,
+      { 
+        parse_mode: 'Markdown',
+        ...Markup.inlineKeyboard([
+          [Markup.button.callback('🔙 Back to TP/SL Selection', `${mode}_tpsl_${side.toLowerCase()}_${symbol}_${amount}_${amountType}`)]
+        ])
+      }
+    );
+
+    // Set conversation state to expect custom TP input
+    if (ctx.userState) {
+      const conversationState = {
+        step: 'waiting_custom_pair' as const,
+        data: { 
+          mode: mode,
+          side: side,
+          symbol: symbol,
+          amount: amount,
+          amountType: amountType,
+          action: 'custom_tp' as const 
+        }
+      };
+      
+      ctx.userState.conversationState = conversationState;
+      await this.authMiddleware.setConversationState(ctx.userState.telegramId, conversationState);
+      
+      console.log(`[CustomTPSL] Set conversation state for user ${ctx.userState.telegramId}: waiting custom TP for ${symbol}`);
+    }
   }
 
   /**

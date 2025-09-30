@@ -44,7 +44,7 @@ export class AsterApiClient {
     
     this.axios = axios.create({
       baseURL: baseUrl,
-      timeout: 30000,
+      timeout: 15000, // Reduced timeout for faster failures
       headers: {
         'X-MBX-APIKEY': apiKey,
         'Content-Type': 'application/x-www-form-urlencoded',

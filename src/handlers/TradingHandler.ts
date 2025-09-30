@@ -61,6 +61,31 @@ export class TradingHandler extends BaseHandler {
     return this.futuresAccountService;
   }
 
+  /**
+   * Get spot price directly from spot API (for spot-only symbols like USDCUSDT)
+   */
+  private async getSpotPriceDirect(symbol: string): Promise<number> {
+    try {
+      const AsterApiClient = await import('../aster');
+      const spotClient = new AsterApiClient.AsterApiClient('https://sapi.asterdex.com', '', '');
+      const tickers = await spotClient.getAllSpotTickers();
+      const ticker = tickers.find(t => t.symbol === symbol);
+      
+      if (ticker && ticker.lastPrice) {
+        const price = parseFloat(ticker.lastPrice);
+        if (price > 0) {
+          console.log(`[TradingHandler] Successfully fetched spot price for ${symbol}: $${price}`);
+          return price;
+        }
+      }
+      
+      throw new Error(`No valid spot price found for ${symbol}`);
+    } catch (error) {
+      console.error(`[TradingHandler] Failed to get spot price for ${symbol}:`, error);
+      throw error;
+    }
+  }
+
   async handleSpotTrading(ctx: BotContext, customSymbol?: string): Promise<void> {
     const correlationId = this.getCorrelationId(ctx);
     
@@ -316,7 +341,7 @@ export class TradingHandler extends BaseHandler {
     symbol: string, 
     availableUsdt: number
   ): Promise<void> {
-    const currentPrice = await this.priceService.getCurrentPrice(symbol);
+    const currentPrice = await this.getSpotPriceDirect(symbol);
     const baseAsset = symbol.replace('USDT', '');
     
     const spotText = `
