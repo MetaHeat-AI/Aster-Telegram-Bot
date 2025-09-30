@@ -109,21 +109,18 @@ export class SpotAccountService {
 
     try {
       const symbol = `${asset}USDT`;
-      const ticker = await this.apiClient.get24hrTicker(symbol);
-      const price = parseFloat(ticker.lastPrice);
-      return amount * price;
-    } catch (error) {
-      // If can't get price from futures API, try spot
-      try {
-        const allTickers = await this.apiClient.getAllSpotTickers();
-        const ticker = allTickers.find(t => t.symbol === `${asset}USDT`);
-        if (ticker) {
-          const price = parseFloat(ticker.lastPrice);
-          return amount * price;
-        }
-      } catch (spotError) {
-        console.warn(`[SpotAccountService] Could not get USD value for ${asset}:`, error);
+      // For spot account service, use spot API directly
+      const allTickers = await this.apiClient.getAllSpotTickers();
+      const ticker = allTickers.find(t => t.symbol === symbol);
+      if (ticker) {
+        const price = parseFloat(ticker.lastPrice);
+        return amount * price;
+      } else {
+        console.warn(`[SpotAccountService] No spot ticker found for ${symbol}`);
+        return 0;
       }
+    } catch (error) {
+      console.warn(`[SpotAccountService] Could not get USD value for ${asset}:`, error);
       return 0;
     }
   }
