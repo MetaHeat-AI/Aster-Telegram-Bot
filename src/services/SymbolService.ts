@@ -21,6 +21,19 @@ export class SymbolService {
     return await this.fetchSymbolData();
   }
 
+  /**
+   * Check if a symbol is a test/development symbol that should be excluded
+   */
+  private isTestSymbol(symbol: string): boolean {
+    const testKeywords = [
+      'TEST', 'DEMO', 'FAKE', 'MOCK', 'SAMPLE', 
+      'CDL', 'FORM', 'USD1', 'USD2', 'USD3'
+    ];
+    
+    const upperSymbol = symbol.toUpperCase();
+    return testKeywords.some(keyword => upperSymbol.includes(keyword));
+  }
+
   async getTopSymbolsByVolume(count: number = 10, type: 'spot' | 'futures' | 'both' = 'both'): Promise<SymbolData[]> {
     // For better separation, fetch symbols directly from appropriate API
     if (type === 'spot') {
@@ -31,7 +44,7 @@ export class SymbolService {
 
     // For 'both', use combined data
     const symbols = await this.fetchSymbolData();
-    const usdtPairs = symbols.filter(s => s.symbol.endsWith('USDT'));
+    const usdtPairs = symbols.filter(s => s.symbol.endsWith('USDT') && !this.isTestSymbol(s.symbol));
     
     // Sort by quote volume (trading volume in USDT)
     const sortedByVolume = usdtPairs.sort((a, b) => {
@@ -65,11 +78,12 @@ export class SymbolService {
       console.log(`[SymbolService] Found ${spotSymbols.size} available spot symbols`);
       console.log(`[SymbolService] Sample spot symbols:`, Array.from(spotSymbols).slice(0, 5));
 
-      // Filter to only USDT pairs that are available on spot
+      // Filter to only USDT pairs that are available on spot, excluding test symbols
       const spotUsdtTickers = spotTickers
         .filter(ticker => 
           ticker.symbol.endsWith('USDT') && 
-          spotSymbols.has(ticker.symbol)
+          spotSymbols.has(ticker.symbol) &&
+          !this.isTestSymbol(ticker.symbol)
         )
         .sort((a, b) => {
           const volumeA = parseFloat(a.quoteVolume || '0');
@@ -78,6 +92,19 @@ export class SymbolService {
         })
         .slice(0, count);
 
+      // Log filtered out test symbols for debugging
+      const filteredOutSymbols = spotTickers
+        .filter(ticker => 
+          ticker.symbol.endsWith('USDT') && 
+          spotSymbols.has(ticker.symbol) &&
+          this.isTestSymbol(ticker.symbol)
+        )
+        .map(t => t.symbol);
+      
+      if (filteredOutSymbols.length > 0) {
+        console.log(`[SymbolService] Filtered out test symbols:`, filteredOutSymbols);
+      }
+      
       console.log(`[SymbolService] Top ${count} spot symbols:`, spotUsdtTickers.map(t => t.symbol));
       
       // Check specifically for SOLUSDT
@@ -119,11 +146,12 @@ export class SymbolService {
           .map((s: any) => s.symbol)
       );
 
-      // Filter to only USDT pairs that are available on futures
+      // Filter to only USDT pairs that are available on futures, excluding test symbols
       const futuresUsdtTickers = futuresTickers
         .filter(ticker => 
           ticker.symbol.endsWith('USDT') && 
-          futuresSymbols.has(ticker.symbol)
+          futuresSymbols.has(ticker.symbol) &&
+          !this.isTestSymbol(ticker.symbol)
         )
         .sort((a, b) => {
           const volumeA = parseFloat(a.quoteVolume || '0');
