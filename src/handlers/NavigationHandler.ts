@@ -33,30 +33,30 @@ Trade spot and perpetuals on **AsterDEX** instantly, right from Telegram. **Zero
 
         const keyboard = Markup.inlineKeyboard([
           [
-            Markup.button.callback('🚀 Get Started', 'main_menu'),
-            Markup.button.callback('🔗 Link API', 'link_api')
+            Markup.button.callback('Secure Connect', 'link_api'),
+            Markup.button.callback('Help', 'help')
           ],
           [
-            Markup.button.callback('💹 Trade Now', 'unified_trade'),
-            Markup.button.callback('💼 Portfolio', 'portfolio')
-          ],
-          [
-            Markup.button.callback('📊 Market Prices', 'prices'),
-            Markup.button.callback('⚙️ Settings', 'settings')
-          ],
-          [
-            Markup.button.callback('📖 Help & Guide', 'help'),
-            Markup.button.callback('ℹ️ Commands', 'show_commands')
+            Markup.button.callback('Trade', 'unified_trade'),
+            Markup.button.callback('Functions', 'show_commands')
           ]
         ]);
         
         await this.emitNavigation(ctx, 'unknown', 'welcome');
         
-        await ctx.reply(welcomeText, { 
-          parse_mode: 'Markdown',
-          disable_web_page_preview: true,
-          ...keyboard 
-        });
+        try {
+          await ctx.editMessageText(welcomeText, { 
+            parse_mode: 'Markdown',
+            disable_web_page_preview: true,
+            ...keyboard 
+          });
+        } catch (error) {
+          await ctx.reply(welcomeText, { 
+            parse_mode: 'Markdown',
+            disable_web_page_preview: true,
+            ...keyboard 
+          });
+        }
 
         this.eventEmitter.emitEvent({
           type: EventTypes.INTERFACE_LOADED,
@@ -77,21 +77,23 @@ Trade spot and perpetuals on **AsterDEX** instantly, right from Telegram. **Zero
       ctx,
       async () => {
         const menuText = `
-🏠 **AsterBot Main Dashboard**
+**StableSolid Trading Dashboard**
 
-Your complete trading control center for Aster DEX. Execute professional trades, monitor your portfolio performance, and manage risk — all from Telegram.
+Your trading control center for AsterDEX. Execute trades, monitor portfolio, and manage risk from Telegram.
 
-**🚀 Quick Actions:**
-• **Trade** — Instant spot & futures execution with smart slippage protection
-• **Portfolio** — Real-time P&L tracking and position management  
-• **Prices** — Live market data, volume leaders, and watchlists
-• **Settings** — Configure risk limits, presets, and security features
-• **Help** — Guides, support, and feature documentation
-
-**Select your next action:**
+**Select your action:**
         `.trim();
 
-        const keyboard = this.getMainMenuKeyboard();
+        const keyboard = Markup.inlineKeyboard([
+          [
+            Markup.button.callback('Secure Connect', 'link_api'),
+            Markup.button.callback('Help', 'help')
+          ],
+          [
+            Markup.button.callback('Trade', 'unified_trade'),
+            Markup.button.callback('Functions', 'show_commands')
+          ]
+        ]);
         
         await this.emitNavigation(ctx, 'unknown', 'main_menu');
         
@@ -131,47 +133,49 @@ Your complete trading control center for Aster DEX. Execute professional trades,
         }
 
         const tradeText = `
-📈 **Professional Trading Suite**
+**Trading Suite**
 
-Execute trades instantly with institutional-grade execution, smart slippage protection, and real-time position management. Choose your preferred trading mode below.
+Execute trades instantly with smart slippage protection and real-time position management.
 
-**🏪 Spot Trading:**
-• Direct asset ownership (BTC, ETH, ASTER, etc.)
-• No liquidation risk, perfect for HODLing
-• Instant execution with best market prices
-• Custom amounts and percentage-based sizing
+**Spot Trading:**
+Direct asset ownership with no liquidation risk. Instant execution with best market prices.
 
-**⚡ Perpetual Futures:**
-• Leveraged trading up to 125x leverage
-• Long and short any market direction
-• Cross and isolated margin modes
-• Advanced risk management tools
+**Perpetual Futures:**
+Leveraged trading up to 125x leverage. Long and short any market direction with advanced risk management.
 
-**📊 Portfolio Tools:**
-• Real-time P&L tracking and analysis
-• Position management with partial closes
-• Balance monitoring across all assets
+**Portfolio Tools:**
+Real-time P&L tracking, position management, and balance monitoring.
 
 **Select your action:**
         `.trim();
 
         const keyboard = Markup.inlineKeyboard([
           [
-            Markup.button.callback('🏪 Spot Trading', 'trade_spot'),
-            Markup.button.callback('⚡ Perps Trading', 'trade_perps')
+            Markup.button.callback('Spot Trading', 'trade_spot'),
+            Markup.button.callback('Perps Trading', 'trade_perps')
           ],
           [
-            Markup.button.callback('📊 View Positions', 'positions'),
-            Markup.button.callback('💰 Check Balance', 'balance')
+            Markup.button.callback('View Positions', 'positions'),
+            Markup.button.callback('Check Balance', 'balance')
           ],
           [
-            Markup.button.callback('📈 P&L Analysis', 'pnl_analysis')
-          ],
-          this.getBackNavigation('main_menu')
+            Markup.button.callback('Back to Home', 'back_to_home')
+          ]
         ]);
 
         await this.emitNavigation(ctx, 'main_menu', 'trading_menu');
-        await ctx.reply(tradeText, { parse_mode: 'Markdown', ...keyboard });
+        
+        try {
+          await ctx.editMessageText(tradeText, { 
+            parse_mode: 'Markdown', 
+            ...keyboard 
+          });
+        } catch (error) {
+          await ctx.reply(tradeText, { 
+            parse_mode: 'Markdown', 
+            ...keyboard 
+          });
+        }
       },
       'Failed to show trading menu'
     );

@@ -729,6 +729,11 @@ export class BotOrchestrator {
       this.handleTeamLevelView(ctx, level);
     });
 
+    // Back to home navigation
+    this.bot.action('back_to_home', (ctx) => 
+      this.navigationHandler.showWelcomeMessage(ctx)
+    );
+
     console.log('[Orchestrator] Actions registered');
   }
 
@@ -1188,43 +1193,45 @@ export class BotOrchestrator {
    */
   private async handleHelpCommand(ctx: BotContext): Promise<void> {
     const helpText = `
-🆘 **AsterBot Knowledge Center**
+**StableSolid Help**
 
-Your complete guide to professional Telegram trading with AsterBot. Learn how to maximize your trading efficiency and unlock all features.
+**Quick-Start Guide:**
+1. Click "Secure Connect" to link your API credentials
+2. Get API keys from aster.exchange → Account → API Management
+3. Start trading with the "Trade" button
 
-**🚀 Quick Start Guide:**
-• **/start** — Welcome and onboarding experience
-• **/link** — Securely connect your Aster DEX API credentials
-• **/trade** — Access the professional trading suite
-• **/price** — Live market intelligence and price tracking
+**API Setup:**
+Visit aster.exchange to create API keys with trading permissions.
 
-**📈 Advanced Commands:**
-• **/positions** — Real-time portfolio and position management
-• **/balance** — Multi-asset balance overview and analysis
-• **/settings** — Customize risk management and trading presets
-• **/menu** — Return to main dashboard anytime
+**Security Note:**
+Keys encrypted. Not your keys, not your coins.
 
-**🎫 Community Commands:**
-• **/invite** — Generate referral codes and view stats
-• **/team** — View your referral team and rankings
-
-**🔧 Trading Features:**
-• **Smart Execution** — Automatic slippage protection and optimal fills
-• **Leverage Trading** — Up to 125x leverage with advanced risk controls
-• **Natural Language** — Type amounts like "$100", "50%", or "0.1 BTC"
-• **One-Click Management** — Partial closes, position sizing, and quick trades
-
-**🛡️ Security & Safety:**
-• Your API keys are encrypted and stored locally
-• PIN protection for sensitive operations
-• Daily loss caps and leverage limits
-• Real-time risk monitoring
-
-**📞 Need More Help?**
-Contact @AsterDEX\\_Support or visit docs.aster.exchange for detailed guides.
+**Bot Commands:**
+/start - Home panel
+/link - Connect API credentials
+/trade - Trading interface
+/balance - Account balance
+/positions - Open positions
+/help - This help menu
+/invite - Generate referral codes
+/team - View referral team
     `.trim();
 
-    await ctx.reply(helpText, { parse_mode: 'Markdown' });
+    const backButton = Markup.inlineKeyboard([
+      [Markup.button.callback('Back to Home', 'back_to_home')]
+    ]);
+
+    try {
+      await ctx.editMessageText(helpText, { 
+        parse_mode: 'Markdown',
+        ...backButton
+      });
+    } catch (error) {
+      await ctx.reply(helpText, { 
+        parse_mode: 'Markdown',
+        ...backButton
+      });
+    }
   }
 
   /**
@@ -5297,44 +5304,22 @@ Contact @AsterDEX\\_Support or visit docs.aster.exchange for detailed guides.
    * Show available commands and navigation help
    */
   private async showCommandsMenu(ctx: BotContext): Promise<void> {
-    const commandsText = [
-      '⚡ **Quick Commands Reference**',
-      '',
-      '🚀 **Essential Commands:**',
-      '• `/start` — Welcome message & main menu',
-      '• `/menu` — Main trading dashboard',
-      '• `/trade` — Quick access to trading',
-      '• `/link` — Connect your API credentials',
-      '',
-      '📊 **Portfolio & Analysis:**',
-      '• `/portfolio` — View your portfolio',
-      '• `/positions` — Check open positions',
-      '• `/prices` — Current market prices',
-      '',
-      '🎫 **Community:**',
-      '• `/invite` — Generate referral codes',
-      '• `/team` — View your referral team',
-      '',
-      '⚙️ **Settings & Help:**',
-      '• `/settings` — Bot preferences & limits',
-      '• `/unlink` — Remove API credentials',
-      '• `/help` — Detailed help guide',
-      '',
-      '💡 **Pro Tips:**',
-      '• Use the **Menu Button** (≡) for quick access',
-      '• Type `/` to see all available commands',
-      '• Commands work from any conversation state'
-    ].join('\n');
+    const commandsText = `
+**Commands**
+
+/start - Home panel
+/link - Connect API credentials  
+/trade - Trading interface
+/balance - Account balance
+/positions - Open positions
+/help - Help menu
+/invite - Generate referral codes
+/team - View referral team
+/unlink - Remove API credentials
+    `.trim();
 
     const keyboard = Markup.inlineKeyboard([
-      [
-        Markup.button.callback('🚀 Get Started', 'main_menu'),
-        Markup.button.callback('💹 Trade Now', 'unified_trade')
-      ],
-      [
-        Markup.button.callback('🔗 Link API', 'link_api'),
-        Markup.button.callback('📖 Help Guide', 'help')
-      ]
+      [Markup.button.callback('Back to Home', 'back_to_home')]
     ]);
 
     try {
