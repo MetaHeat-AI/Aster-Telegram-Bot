@@ -815,25 +815,17 @@ export class BotOrchestrator {
         return;
       }
       
-      // Check if user typed a symbol name for trading
+      // Check if user typed a symbol name for detailed analysis
       const symbolText = ctx.message.text.toUpperCase().trim();
       if (ctx.userState?.isLinked && /^[A-Z0-9]{2,10}$/.test(symbolText)) {
         const possibleSymbol = `${symbolText}USDT`;
-        console.log(`[Text] Checking if ${possibleSymbol} is a valid trading symbol`);
+        console.log(`[Text] Analyzing symbol ${possibleSymbol} for detailed information`);
         
         try {
-          // Check if this is a valid symbol
-          const apiClient = await this.apiClientService.getOrCreateClient(ctx.userState.userId);
-          const tickers = await apiClient.getAllSpotTickers();
-          const symbolExists = tickers.some(t => t.symbol === possibleSymbol);
-          
-          if (symbolExists) {
-            console.log(`[Text] ${possibleSymbol} is valid, showing trading interface`);
-            await this.handleSpotTradeChoice(ctx, possibleSymbol);
-            return;
-          }
+          await this.handleSymbolAnalysis(ctx, possibleSymbol);
+          return;
         } catch (error) {
-          console.warn(`[Text] Error checking symbol ${possibleSymbol}:`, error);
+          console.warn(`[Text] Error analyzing symbol ${possibleSymbol}:`, error);
         }
       }
 
@@ -4053,6 +4045,134 @@ Keys encrypted. Not your keys, not your coins.
     } catch (error) {
       console.error(`[SpotTradeChoice] Error for ${symbol}:`, error);
       await ctx.reply(`❌ Unable to load ${symbol} trading options. Please try again.`);
+    }
+  }
+
+  /**
+   * Handle comprehensive symbol analysis with price, holdings, and positions
+   */
+  private async handleSymbolAnalysis(ctx: BotContext, symbol: string): Promise<void> {
+    try {
+      if (!ctx.userState?.isLinked) {
+        await ctx.reply('❌ Please link your API credentials first using /link');
+        return;
+      }
+
+      const apiClient = await this.apiClientService.getOrCreateClient(ctx.userState.userId);
+      const cleanSymbol = symbol.replace('USDT', '');
+
+      // Check if symbol exists in spot or futures
+      const [spotTickers, futuresTickers] = await Promise.all([
+        apiClient.getAllSpotTickers().catch(() => []),
+        apiClient.getAllFuturesTickers().catch(() => [])
+      ]);
+
+      const spotData = spotTickers.find(t => t.symbol === symbol);
+      const futuresData = futuresTickers.find(t => t.symbol === symbol);
+
+      if (!spotData && !futuresData) {
+        console.log(`[SymbolAnalysis] ${symbol} not found in any market`);
+        return; // Symbol doesn't exist, don't respond
+      }
+
+      console.log(`[SymbolAnalysis] Found ${symbol} - Spot: ${!!spotData}, Futures: ${!!futuresData}`);
+
+      // Get current price and 24h data
+      const priceData = spotData || futuresData!;
+      const currentPrice = parseFloat(priceData.lastPrice);
+      const change24h = parseFloat(priceData.priceChangePercent);
+      const volume24h = parseFloat(priceData.quoteVolume || '0');
+
+      // Build analysis text
+      let analysisText = [
+        `📊 **${cleanSymbol}/USDT Analysis**`,
+        `💵 **Price:** $${currentPrice.toFixed(6)}`,
+        `📈 **24h Change:** ${change24h >= 0 ? '🟢' : '🔴'} ${change24h >= 0 ? '+' : ''}${change24h.toFixed(2)}%`,
+        `📊 **24h Volume:** $${(volume24h / 1000000).toFixed(2)}M`,
+        ''
+      ];
+
+      const keyboard = [];
+
+      // Check spot holdings
+      if (spotData) {
+        try {
+          const SpotAccountService = await import('../services/SpotAccountService');
+          const spotService = new SpotAccountService.SpotAccountService(apiClient);
+          const assetBalance = await spotService.getAssetBalance(cleanSymbol);
+          
+          if (assetBalance && assetBalance.total > 0.0001) {
+            analysisText.push(`🏪 **Spot Holdings:** ${assetBalance.total.toFixed(4)} ${cleanSymbol} ($${(assetBalance.usdValue || 0).toFixed(2)})`);
+          } else {
+            analysisText.push(`🏪 **Spot Holdings:** 0 ${cleanSymbol}`);
+          }
+        } catch (error) {
+          console.warn('[SymbolAnalysis] Error getting spot balance:', error);
+          analysisText.push(`🏪 **Spot:** Available for trading`);
+        }
+      }
+
+      // Check futures positions
+      if (futuresData) {
+        try {
+          const FuturesAccountService = await import('../services/FuturesAccountService');
+          const futuresService = new FuturesAccountService.FuturesAccountService(apiClient);
+          const position = await futuresService.getPosition(symbol);
+          
+          if (position && position.size > 0) {
+            const pnlEmoji = position.unrealizedPnl >= 0 ? '🟢' : '🔴';
+            analysisText.push(`⚡ **Futures Position:** ${position.side} $${position.notional.toFixed(2)} ${pnlEmoji} ${position.unrealizedPnl >= 0 ? '+' : ''}$${position.unrealizedPnl.toFixed(2)}`);
+          } else {
+            analysisText.push(`⚡ **Futures Position:** None`);
+          }
+        } catch (error) {
+          console.warn('[SymbolAnalysis] Error getting futures position:', error);
+          analysisText.push(`⚡ **Futures:** Available for trading`);
+        }
+      }
+
+      analysisText.push('');
+      analysisText.push('🎯 **Choose Trading Mode:**');
+
+      // Add trading buttons
+      const tradingButtons = [];
+      if (spotData) {
+        tradingButtons.push(Markup.button.callback('🏪 Spot Trading', `spot_trade_${symbol}`));
+      }
+      if (futuresData) {
+        tradingButtons.push(Markup.button.callback('⚡ Futures Trading', `perps_buy_${symbol}`));
+      }
+      
+      if (tradingButtons.length > 0) {
+        keyboard.push(tradingButtons);
+      }
+
+      // Quick action buttons
+      const quickActions = [];
+      if (spotData) {
+        quickActions.push(Markup.button.callback('💹 Quick Spot Buy', `spot_buy_${symbol}`));
+      }
+      if (futuresData) {
+        quickActions.push(Markup.button.callback('⚡ Quick Long', `perps_buy_${symbol}`));
+        quickActions.push(Markup.button.callback('📉 Quick Short', `perps_sell_${symbol}`));
+      }
+      
+      if (quickActions.length > 0) {
+        keyboard.push(quickActions.slice(0, 2)); // Limit to 2 per row
+        if (quickActions.length > 2) {
+          keyboard.push(quickActions.slice(2));
+        }
+      }
+
+      // Send the analysis
+      await ctx.reply(analysisText.join('\n'), {
+        parse_mode: 'Markdown',
+        ...Markup.inlineKeyboard(keyboard)
+      });
+
+    } catch (error) {
+      console.error(`[SymbolAnalysis] Error analyzing ${symbol}:`, error);
+      // Don't send error message to avoid spam, just log it
     }
   }
 
